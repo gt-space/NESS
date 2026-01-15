@@ -1,4 +1,4 @@
-from general_fluid_network import Node, Ambient, Connection, ThrottleValve, Network
+from general_fluid_network import Node, Ambient, Connection, ThrottleValve, Network, Tank
 #################### TEST CONFIGS #########################
 import math
 
@@ -83,7 +83,7 @@ test_network.plot_connections_overlay([tv1], units="E")
 # test_network.sim(1000, 1, {400: (vent_line, True)})
 # test_network.plot_nodes_overlay((fill_tanks, vehicle_tank), title="Darcy Space Validation", units="E")
 
-
+# GN2 TEST
 # gas_bottle = Node("Nitrogen", 0.15, 3, 293)
 # amb_node = Ambient()
 # vent_diameter = 3 # mm
@@ -93,4 +93,29 @@ test_network.plot_connections_overlay([tv1], units="E")
 # gas_network = Network({gas_vent : {gas_bottle, amb_node}})
 # gas_network.sim(60, 1)
 # gas_network.plot_nodes_overlay([gas_bottle], units="E")
+
+# ACTIVE PRESS + FILL + FULL THROTTLE
+# fill params
+n = 7 # num bottles
+vol = 50 # L
+bottle_temp = 305 # K
+burn_duration = 60 # s
+fill_duration = 1100 # s
+# vehicle tanks
+copv = Node("Nitrogen", 2.4, 6.61, 293, "COPV") #subscale copv
+ox_tank = Tank("N2O", 40, "Nitrogen", 1, )
+fuel_tank = Tank()
+amb_node = Ambient()
+chamber = Ambient(P=101325*350*1.25/14.7)
+# valves
+bb_ox = Connection(0.00005, 0, 0) # PLV
+bb_fuel = Connection(0.00005, 0, 0) # PLV
+tv_ox = ThrottleValve(1, target_mdot=0.0, normal_state=0.0)
+tv_fuel = ThrottleValve(1, target_mdot=0.0, normal_state=0.0)
+# network and som
+test_network = Network({fill_line: (fill_tanks, vehicle_tank), vent_line: (vehicle_tank, amb_node), tv1: (vehicle_tank, chamber)})
+test_network.sim(fill_duration+burn_duration, 1, {300: (vent_line, True), fill_duration-10: (fill_line, False), fill_duration-1: (vent_line, False), fill_duration: (tv1, 0.57*0.5), fill_duration+10: (tv1, 0.57)})
+test_network.plot_nodes_overlay((fill_tanks, vehicle_tank), title=f"{burn_duration}s, {vol}L, {n} Bottles, {bottle_temp}K", units="E")
+test_network.plot_connections_overlay([tv1], units="E")
+
 

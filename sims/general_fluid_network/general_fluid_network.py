@@ -67,8 +67,8 @@ class Node():
         # node history dict initialization
         self.history = {k: [] for k in ["time","Q","P","T","H","h","d","m","m_l","m_v", "fill_level", "s"]}
 
-    # def __init__(self, node):
-    #     self.
+    # TODO write P, V, T init method @ ADAM
+    
     def _flash_from_DH(self, d, H):
         """
         Given bulk density d (kg/m3) and total enthalpy H (J),
@@ -230,6 +230,131 @@ class Chamber(Node):
     """
     # TODO
     pass
+
+
+class Tank(Node):
+    """
+    Two-phase Tank Node.
+    The 'Tank' instance itself represents the Liquid node (bottom).
+    It contains a .ullage attribute which is the Gas node (top).
+    
+    The two nodes are coupled by a Volume constraint: V_liq + V_gas = V_tank.
+    Pressure is iterated until this constraint is met.
+    """
+    def __init__(self, fluid_liq, m_liq, fluid_gas, m_gas, V_total_L, T_liq, T_gas, name="tank"):
+        self.V_total = float(V_total_L) / 1000.0  # Store fixed tank volume [m^3]
+        
+        # 1. Initialize the Liquid Node (The Tank object itself)
+        # We start with an arbitrary guess for volume (e.g. 50% fill), it will be corrected immediately.
+        V_guess_l = self.V_total * 0.5
+        super().__init__(fluid_liq, m_liq, V_guess_l * 1000.0, T_liq, name=name)
+        
+        # 2. Initialize the Ullage Node (Internal Node object)
+        V_guess_g = self.V_total - V_guess_l
+        self.ullage = Node(fluid_gas, m_gas, V_guess_g * 1000.0, T_gas, name=f"{name}_ullage")
+        
+        # 3. Force an initial equilibrium solve to set correct P and V for both
+        self._balance_volumes()
+
+    def update(self, mdot_l, Hdot_l, mdot_g, Hdot_g, dt):
+        """
+        Custom update that handles mass/energy fluxes for both phases
+        and enforces the shared pressure/volume constraint.
+        """
+        # --- Step 1: Integrate Mass and Energy (Euler Step) ---
+        self.m += mdot_l * dt
+        self.H += Hdot_l * dt
+        
+        self.ullage.m += mdot_g * dt
+        self.ullage.H += Hdot_g * dt
+
+        # Numerical safety floors
+        if self.m < 1e-12: self.m = 1e-12
+        if self.ullage.m < 1e-12: self.ullage.m = 1e-12
+
+        # --- Step 2: Solve for shared Pressure ---
+        # This function adjusts self.V and self.ullage.V until they sum to V_total
+        self._balance_volumes()
+
+        # --- Step 3: Update Fluid States (Flash) ---
+        # Now that volumes are correct, we update the thermodynamic state (T, P, x, etc)
+        # based on the new density (m/V) and specific enthalpy (H/m).
+        
+        # Update Liquid State
+        self.d = self.m / self.V
+        self._flash_from_DH(self.d, self.H)
+        
+        # Update Ullage State
+        self.ullage.d = self.ullage.m / self.ullage.V
+        self.ullage._flash_from_DH(self.ullage.d, self.ullage.H)
+
+    def _balance_volumes(self):
+        """
+        Iteratively find the Pressure P such that:
+        Volume_Liq(P, H_l) + Volume_Gas(P, H_g) = V_Total
+        """
+        # Specific enthalpies (held constant during P solve)
+        h_l = self.H / self.m
+        h_g = self.ullage.H / self.ullage.m
+
+        # Initial Guess for P (use current P)
+        p_guess = self.P
+        
+        # Perturbation for Secant method
+        p_step = 1000.0 # 1 kPa step
+        
+        # Solver loop (Secant Method)
+        for i in range(20):
+            # Calculate Residual for P1
+            err1 = self._get_vol_error(p_guess, h_l, h_g)
+            
+            if abs(err1) < 1e-6: # Tolerance: 1 mL
+                break
+                
+            # Calculate Residual for P2 (perturbed)
+            p_guess_2 = p_guess + p_step
+            err2 = self._get_vol_error(p_guess_2, h_l, h_g)
+            
+            # Secant update
+            # Avoid divide by zero
+            denom = (err2 - err1)
+            if abs(denom) < 1e-12:
+                break # Jacobian singular, stick with current P
+            
+            p_new = p_guess - err1 * (p_step / denom)
+            
+            # Safety clamp for pressure (non-negative)
+            if p_new < 100: p_new = 100.0 
+            
+            p_guess = p_new
+            # Adjust step size for next iteration if needed, or keep constant
+            
+        # Apply the final Volumes based on the found P
+        rho_l = PropsSI_auto('D', 'P', p_guess, 'H', h_l, self.fluid)
+        rho_g = PropsSI_auto('D', 'P', p_guess, 'H', h_g, self.ullage.fluid)
+        
+        self.V = self.m / rho_l
+        self.ullage.V = self.ullage.m / rho_g
+
+    def _get_vol_error(self, p, h_l, h_g):
+        """ Helper to calculate Volume Error at a given Pressure """
+        try:
+            # Get densities at candidate Pressure & Fixed Enthalpy
+            rho_l = PropsSI_auto('D', 'P', p, 'H', h_l, self.fluid)
+            rho_g = PropsSI_auto('D', 'P', p, 'H', h_g, self.ullage.fluid)
+            
+            v_l = self.m / rho_l
+            v_g = self.ullage.m / rho_g
+            
+            return (v_l + v_g) - self.V_total
+        except:
+            # If PropsSI fails (e.g. out of bounds), return large error to force solver back
+            return 1.0 
+
+    def log_state(self, t=0.0):
+        """ Overrides log_state to log the ullage as well """
+        super().log_state(t) # Log liquid part
+        self.ullage.log_state(t) # Log gas part        
 
 
 class Connection():
@@ -441,6 +566,21 @@ class Valve(Connection):
     pass
 
 
+class BangBang(Connection):
+    """
+    Subclass of Node to represent a sharp-edged orifice.
+    """
+    def __init__(self, CdA, target_pressure, qdot=0.0, location=0.0, normal_state=True, checking=True, name="connection"):
+        super().__init__(CdA, qdot, location, normal_state, checking=True, name="bang_bang")
+        self.target_pressure = target_pressure
+
+    def select_state(self, downstream_node):
+        if downstream_node.P > self.target_pressure:
+            self.state = False
+        else:
+            self.state = True
+
+
 class SharpEdgedOrifice(Connection):
     """
     Subclass of Node to represent a sharp-edged orifice.
@@ -590,46 +730,94 @@ class Pump(Connection):
 
 class Network():
     """
-    Network class. Defined by a graph of connections and nodes representing a fluid network.
-    Syntax is as follows: {connection1: (node1, node2), ...}
+    Network class. Defined by a graph of connections and nodes.
+    Automatically detects 'Tank' objects to handle coupled liquid/ullage updates.
     """
     def __init__(self, graph):
         self.graph = graph  # {connection: (node1, node2)}
+        
+        # Pre-scan the graph to identify Tank objects. 
+        # We need this list so we can prioritize their coupled updates in sim().
+        self.tanks = set()
+        for pair in self.graph.values():
+            for node in pair:
+                # Check if this node is an instance of the Tank class
+                # (We check type name to avoid strict import dependencies, 
+                # or use isinstance(node, Tank) if Tank is in scope)
+                if type(node).__name__ == 'Tank': 
+                    self.tanks.add(node)
 
     def sim(self, t, dt, actions={}, verbose_steps=5):
         """
-        Runs a transient sim over a fluid network. Takes in total sim runtime, timestep, and an action profile of
-        valve set-states and timings.
-        Args:
-            t: total sim runtime [s] (float)
-            dt: timestep duration [s] (float)
-            actions: {time [s]: (connection, set_state), ...}, action time must be of the same order of precision as dt.
+        Runs transient sim. Handles standard Nodes and coupled Tank Nodes.
         """
         steps = int(t / dt)
+        
         for i in range(steps):
             time_now = i * dt
+            
+            # 1. Apply Actions
             if time_now in actions:
-                actions[time_now][0].state = actions[time_now][1]
+                conn, state = actions[time_now]
+                conn.state = state
+                if verbose_steps > 0:
+                    print(f"--- Action at {time_now}s: {conn.name} set to {state} ---")
 
-            # compute all flows first
-            mdot_contrib = {node: 0.0 for _, pair in self.graph.items() for node in pair}
-            Hdot_contrib = {node: 0.0 for _, pair in self.graph.items() for node in pair}
+            # 2. Compute Fluxes (mdot, Hdot) for all connections
+            # We initialize contributions for ALL nodes found in the graph
+            all_nodes = set(node for pair in self.graph.values() for node in pair)
+            mdot_contrib = {n: 0.0 for n in all_nodes}
+            Hdot_contrib = {n: 0.0 for n in all_nodes}
 
             for conn, (n1, n2) in self.graph.items():
                 mdot, Hdot = conn.mdot_Hdot(n1, n2)
-                # mdot positive => n1 -> n2
+                if conn is BangBang:
+                    conn.select_state(n2)
+                # Flow convention: n1 -> n2 is positive
                 mdot_contrib[n1] -= mdot
                 mdot_contrib[n2] += mdot
                 Hdot_contrib[n1] -= Hdot
                 Hdot_contrib[n2] += Hdot
+                
                 conn.log_state(time_now)
 
-            # update nodes simultaneously
-            for node in list(mdot_contrib.keys()):
-                node.update(mdot_contrib[node], Hdot_contrib[node], dt)
+            # 3. Update Nodes
+            # We track which nodes have been updated to avoid double-counting
+            processed_nodes = set()
+
+            # --- A. Update Tanks (Coupled Liquid + Ullage) ---
+            for tank in self.tanks:
+                # Get Liquid fluxes
+                mdot_l = mdot_contrib.get(tank, 0.0)
+                Hdot_l = Hdot_contrib.get(tank, 0.0)
+                
+                # Get Ullage fluxes (access the .ullage attribute of the tank)
+                mdot_g = mdot_contrib.get(tank.ullage, 0.0)
+                Hdot_g = Hdot_contrib.get(tank.ullage, 0.0)
+
+                # Perform the coupled update
+                tank.update(mdot_l, Hdot_l, mdot_g, Hdot_g, dt)
+                
+                # Mark both parts of the tank as processed
+                processed_nodes.add(tank)
+                processed_nodes.add(tank.ullage)
+                
+                # Logging
                 if i < verbose_steps:
-                # print only first few steps to avoid log overload
-                    print(f"[t={time_now:.4f}] {node.name} mdot_net={mdot_contrib[node]:.6f}, Hdot_net={Hdot_contrib[node]:.3f}")
+                    print(f"[t={time_now:.4f}] {tank.name} (Tank) P={tank.P/1e5:.2f} bar")
+
+            # --- B. Update Standard Nodes ---
+            for node in mdot_contrib:
+                if node not in processed_nodes:
+                    # Standard update
+                    node.update(mdot_contrib[node], Hdot_contrib[node], dt)
+                    processed_nodes.add(node)
+                    
+                    if i < verbose_steps:
+                        print(f"[t={time_now:.4f}] {node.name} mdot_net={mdot_contrib[node]:.6f}")
+
+            # 4. Log States for all nodes
+            for node in processed_nodes:
                 node.log_state(time_now)
 
     def plot_nodes_overlay(self, nodes, title="Node Comparison", units="SI"):
