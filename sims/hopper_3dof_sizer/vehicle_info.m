@@ -5,7 +5,7 @@ C_G = 1;  % center of gravity change over time
 m0 = 48;
 mp =  mt - m0;
 tb= 65;
-mdot  = 1.3;
+mdot  = 0;
 
 D_m    = 0.2;
 r_m = D_m/2;
