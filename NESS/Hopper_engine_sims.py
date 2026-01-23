@@ -23,12 +23,12 @@ export_regen_chans = False
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
-fuName = "Isopropanol"  # IPA
-oxName = "N2O"
+fuName = "RP-1"  # IPA
+oxName = "LOX"
 thrust = 550 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
-MRcore = 3
+MRcore = 2
 CR = 5.0
 Lstar = 30 # in
 cstarEff = 0.85
