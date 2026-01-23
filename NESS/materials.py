@@ -30,7 +30,7 @@ class Material:
             sigma_y = np.array([29.587752, 28.717524, 26.251878, 26.396916, 22.916004, 19.145016, 10.15266, 4.35114, 1.740456]) # ksi
             self.stress_interp = PchipInterpolator(T, sigma_y)
 
-'''
+        '''
         elif self.material_name == "316L SS":
             self.rho = 
             self.k = 
@@ -49,7 +49,7 @@ class Material:
             self.YS = 
             self.E = 
         Also GrCop-84, 
-'''
+    '''
     def get_yield_temp(self, temp):
         
        return stress_interp(temp)
