@@ -19,21 +19,22 @@ display_regen_outputs = False
 display_nozzle_mesh = False
 show_nozzle_plot = True
 export_nozzle = False
-export_regen_chans = False
+export_regen_chans = True
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
-fuName = "RP-1"  # IPA
+fuName = "Kerosene"  # Jet-A
 oxName = "LOX"
 thrust = 550 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
 MRcore = 2
-CR = 5.0
-Lstar = 30 # in
+CR = 5.5
+Lstar = 40 # in
 cstarEff = 0.85
 numPts = 100
 
+# 40 in L* is what Vespula Heatsink uses
 # L* = 43 in
 # CR = 6.5
 
@@ -67,10 +68,10 @@ t_w = 1 / 1000 # [mm] --> [m]
 N = 60
 C_w = 1.5 / 1000 # [mm] --> [m]
 C_h = 2.5 / 1000 # [mm] --> [m]
-coolantName = "Dodecane"
+coolantName = "Ethanol"
 tot_coolant_mdot = engine.fu_mdot # kg/s
 inlet_T_c = 293 # [K]
-inlet_P_c = 460 * 6894.7 # [psia] --> [Pa]
+inlet_P_c = 420 * 6894.7 # [psia] --> [Pa]
 # circuit_inlet = -100 # Not used for now
 material = Material("Pure Copper")
 
@@ -128,7 +129,10 @@ if show_nozzle_plot:
     engine.R.geomObj.plot_geometry( title=f'Hopper Engine Profile - {thrust} lbf', show_grid=True )
 
 if export_nozzle:
-    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 1_15_26")
+    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_1_26")
+
+#if export_HTC_hg:
+
 
 print(engine.R.get_summ_str())
 
