@@ -1,10 +1,14 @@
+import os
+from pathlib import Path
+
+print("CWD =", os.getcwd())
+print("CSV will be at =", Path("Hopper_Bartz_HTC_550lbf_2_2_26.csv").resolve())
 
 #import regen_circuit as ta
 from materials import Material
 from regen_circuit import RegenCircuit
-
+import numpy as np
 from engine import Engine
-
 import time
 import matplotlib.pyplot as plt
 
@@ -13,13 +17,15 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True
-design_regen = False
+design_regen = True
 display_regen_contour_plot = False
 display_regen_outputs = False
 display_nozzle_mesh = False
-show_nozzle_plot = True
-export_nozzle = False
-export_regen_chans = True
+show_nozzle_plot = False
+export_nozzle = True
+export_regen_chans = False
+show_bartz_plot = True 
+export_bartz_data = True 
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -29,8 +35,8 @@ thrust = 550 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
 MRcore = 2
-CR = 5.5
-Lstar = 40 # in
+CR = 5
+Lstar = 30 # in
 cstarEff = 0.85
 numPts = 100
 
@@ -112,15 +118,20 @@ if design_regen:
     if export_regen_chans:
         regen_circuit.generate_single_channel_curves()
 
-'''
-print(regen_circuit.h_hg_arr)
-plt.figure()
-plt.title("Bartz Testing")
-plt.xlabel("Axial Position (in)")
-plt.ylabel("HTC (W/m^2-K)")
-plt.plot(engine.Contour_z, regen_circuit.h_hg_arr)
-plt.show()
-'''
+if show_bartz_plot:
+    print(regen_circuit.h_hg_arr)
+    plt.figure()
+    plt.title("Bartz Testing")
+    plt.xlabel("Axial Position (in)")
+    plt.ylabel("HTC (W/m^2-K)")
+    plt.plot(engine.Contour_z, regen_circuit.h_hg_arr)
+    plt.show()
+
+if export_bartz_data:
+    import numpy as np
+    data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
+    np.savetxt("Hopper_Bartz_HTC_550lbf_2_2_26.csv", data, delimiter=",", header="Z Position (m), HTC (W/m^2-K)", comments="")
+
 
 ### --- PLOT OUTPUTS ---
 
@@ -129,7 +140,7 @@ if show_nozzle_plot:
     engine.R.geomObj.plot_geometry( title=f'Hopper Engine Profile - {thrust} lbf', show_grid=True )
 
 if export_nozzle:
-    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_1_26")
+    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_2_26")
 
 #if export_HTC_hg:
 
