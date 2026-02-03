@@ -43,7 +43,6 @@ Pa = 14.8
 # OX Valve % Open over PcMR Range
 # FU Valve % Open over PcMR Range
 
-
 def create_engine_map(
     ox_tank_press,
     fu_tank_press,
