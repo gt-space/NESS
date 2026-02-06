@@ -22,10 +22,11 @@ display_regen_contour_plot = False
 display_regen_outputs = False
 display_nozzle_mesh = False
 show_nozzle_plot = False
-export_nozzle = True
+export_nozzle = False
 export_regen_chans = False
-show_bartz_plot = True 
-export_bartz_data = True 
+show_bartz_plot = False 
+export_bartz_data = False 
+export_gas_temps = True
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -132,6 +133,10 @@ if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
     np.savetxt("Hopper_Bartz_HTC_550lbf_2_2_26.csv", data, delimiter=",", header="Z Position (m), HTC (W/m^2-K)", comments="")
 
+if export_gas_temps:
+    import numpy as np
+    data = np.column_stack((engine.Contour_z, engine.T))
+    np.savetxt("Hopper_Gas_Temps_550lbf_2_6_26.csv", data, delimiter=",", header="Z Position (m), Gas Temperature (K)", comments="")
 
 ### --- PLOT OUTPUTS ---
 
