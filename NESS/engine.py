@@ -7,6 +7,7 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+from conical import conicalContour
 
 from rocketisp.geometry import Geometry
 from rocketisp.efficiencies import Efficiencies
@@ -33,7 +34,8 @@ from scipy.interpolate import interp1d
 
 class Engine:
 
-    def __init__(self, thrust, Pc, Pe, MRcore, oxName, fuName, name, CR, Lstar, cstarEff, pcentFFC = 0.0, Pamb = 14.8, numPts = 200, verbose = False):
+    def __init__(self, thrust, Pc, Pe, MRcore, oxName, fuName, name, CR, Lstar, cstarEff, pcentFFC = 0.0, Pamb = 14.8, numPts = 200, verbose = False,
+                 bell = True, chmbR=None, chmbL=None, contAngle=None, throatR=None, throatL=None, expAngle=None, exitR=None):
         self.thrust = thrust
         self.Pc = Pc
         self.Pe = Pe
@@ -48,7 +50,14 @@ class Engine:
         self.name = name
         self.Lprime = self.Lstar / self.CR
         self.numPts = numPts
-
+        self.bell = bell
+        self.chmbR = chmbR
+        self.chmbL = chmbL
+        self.contAngle = contAngle
+        self.throatR = throatR
+        self.throatL = throatL
+        self.expAngle = expAngle
+        self.exitR = exitR
         self.createEngine(verbose=verbose)
         self.calcGasProperties()
 
@@ -71,17 +80,17 @@ class Engine:
         self.Contour_z = [-self.R.geomObj.Lcham] + self.R.geomObj.nozObj.abs_zContour
         self.Contour_r = [self.R.geomObj.Rinj] + self.R.geomObj.nozObj.abs_rContour
 
+        if self.bell == False:
+            my_conical = conicalContour(self.chmbR, self.chmbL, self.contAngle, self.throatR, self.throatL, self.expAngle, self.exitR, self.numPts)
+            self.Contour_z, self.Contour_r = my_conical.makeContour()
+        
         self.Contour_z, self.Contour_r, self.throat_ind, self.chamberEnd_ind = self.resample_nozzle_contour(
-            z_contour = self.Contour_z, 
-            r_contour = self.Contour_r,
-            numPts = self.numPts,
-            verbose=verbose
-        )
-
+        z_contour = self.Contour_z, r_contour = self.Contour_r, numPts = self.numPts, verbose=verbose)        
+        
         print(f"Chamber End Ind: {self.chamberEnd_ind}")
         print(f"Throat Ind: {self.throat_ind}")
-
-        self.At = self.R.geomObj.At
+        
+        self.At = self.R.geomObj.At     
         self.Dt = np.sqrt((4 / np.pi) * self.At) * 0.0254 # [in] --> [m]
         self.eps = self.R.geomObj.eps
         self.r_ch = self.Contour_r[0]
@@ -241,7 +250,6 @@ class Engine:
         Returns:
             np.array of Mach numbers
         """
-
         for i in range(len(self.Contour_r)):
             # Handle M = 1 case
             if abs(self.AreaRatio[i] - 1.0) < tol:

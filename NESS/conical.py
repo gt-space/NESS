@@ -30,7 +30,7 @@ class conicalContour:
         x_exit = x_throat_end + x_length_div
 
         self.z_coords = np.linspace(x_chamber_start, x_exit, self.numpts)
-        self.r_coords = np.zeros(self.numpts)
+        temp_r_coords = []
 
         # Calculate y-coordinates for each x-coordinate
         for x in self.z_coords:
@@ -49,7 +49,8 @@ class conicalContour:
                 m = np.tan(expAngle_rad)
                 y = self.throatR + m * (x - x_throat_end)
                 
-            self.r_coords.append(y)
+            temp_r_coords.append(y)
+        self.r_coords = temp_r_coords
         return self.z_coords, self.r_coords
 
     def plotContour(self):

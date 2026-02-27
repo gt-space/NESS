@@ -17,17 +17,18 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True
+bell = True
 design_regen = True
 display_regen_contour_plot = False
 display_regen_outputs = False
 display_nozzle_mesh = False
-show_nozzle_plot = False
+show_nozzle_plot = True
 export_nozzle = False
 export_regen_chans = False
-show_bartz_plot = False 
-export_bartz_data = True 
-show_gas_temp_plot = False
-export_gas_temps = True
+show_bartz_plot = True 
+export_bartz_data = False 
+show_gas_temp_plot = True
+export_gas_temps = False
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -41,6 +42,14 @@ CR = 5
 Lstar = 30 # in
 cstarEff = 0.85
 numPts = 100
+
+chmbR = 1.35 # in
+chmbL = 4.066 # in, cylindrical portion of chamber
+contAngle = 30 # degrees
+throatR = 0.6021 # in
+throatL = 0.5 # in
+exit_angle = 15 # degrees
+exitR = 1.151 # in
 
 # 40 in L* is what Vespula Heatsink uses
 # L* = 43 in
@@ -65,7 +74,15 @@ if design_engine:
         cstarEff=cstarEff,
         name=name,
         numPts=numPts,
-        verbose=display_nozzle_mesh
+        verbose=display_nozzle_mesh,
+        bell=bell, 
+        chmbR=chmbR, 
+        chmbL=chmbL, 
+        contAngle=contAngle, 
+        throatR=throatR, 
+        throatL=throatL, 
+        expAngle=exit_angle, 
+        exitR=exitR
     )
 
 # Gas Props Testing
