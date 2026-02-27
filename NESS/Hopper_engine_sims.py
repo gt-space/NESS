@@ -17,7 +17,7 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True
-bell = True
+bell = False
 design_regen = True
 display_regen_contour_plot = False
 display_regen_outputs = False
@@ -46,7 +46,7 @@ numPts = 100
 chmbR = 1.35 # in
 chmbL = 4.066 # in, cylindrical portion of chamber
 contAngle = 30 # degrees
-throatR = 0.6021 # in
+throatR = 0.603 # in
 throatL = 0.5 # in
 exit_angle = 15 # degrees
 exitR = 1.151 # in
