@@ -55,8 +55,8 @@ class conicalContour:
 
     def plotContour(self):
         plt.figure(figsize=(10, 5))
-        plt.plot(self.z_coords, self.r_coords, label='Upper Contour')
-        plt.plot(self.z_coords, -np.array(self.r_coords), label='Lower Contour')
+        plt.plot(self.z_coords, self.r_coords, color = 'blue')
+        plt.plot(self.z_coords, -np.array(self.r_coords), color = 'blue')
         plt.title('Conical Nozzle Contour')
         plt.xlabel('Axial Distance (in)')
         plt.ylabel('Radial Distance (in)')

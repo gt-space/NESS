@@ -274,11 +274,14 @@ class Engine:
 
             # Determine if we're in converging or diverging section
             # Check if area is increasing or decreasing
-            if i > 0:
-                dA = self.AreaRatio[i] - self.AreaRatio[i-1]
-                is_diverging = dA > 0
+            if not self.bell:
+                is_diverging = i > self.throat_ind
             else:
-                is_diverging = False  # First point assumed converging
+                if i > 0:
+                    dA = self.AreaRatio[i] - self.AreaRatio[i-1]
+                    is_diverging = dA > 0
+                else:
+                    is_diverging = False
             
             # Pick branch based on nozzle section
             if is_diverging and M_sup is not None:
