@@ -91,8 +91,8 @@ class conicalContour:
             self.throatR,     # Throat radius
             self.exitR        # Exit radius
         ]
-
-        data = np.column_stack((x_crit, y_crit))
+        z_crit = np.zeros(len(x_crit))
+        data = np.column_stack((x_crit, y_crit, z_crit))
         np.savetxt(
             filename,
             data,
