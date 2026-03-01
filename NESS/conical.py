@@ -64,6 +64,37 @@ class conicalContour:
         plt.axis('equal')
         plt.legend()
         plt.show()
-    def saveContour(self, filename="conical_contour.csv"):
-        data = np.column_stack((self.z_coords, self.r_coords))
-        np.savetxt(filename, data, delimiter=",", header="X Position (in), Y Position (in)", comments="")
+
+    def saveContour(self, filename="conical_contourv2.csv"):
+        contAngle_rad = np.radians(self.contAngle)
+        expAngle_rad = np.radians(self.expAngle)
+        x_throat_start = -self.throatL / 2
+        x_throat_end = self.throatL / 2
+        x_length_conv = (self.chmbR - self.throatR) / np.tan(contAngle_rad)
+        x_chamber_end = x_throat_start - x_length_conv
+        x_chamber_start = x_chamber_end - self.chmbL
+        x_length_div = (self.exitR - self.throatR) / np.tan(expAngle_rad)
+        x_exit = x_throat_end + x_length_div
+
+        x_crit = [
+            x_chamber_start,  # Chamber start (injector)
+            x_chamber_end,    # Chamber end / start of convergence
+            x_throat_start,   # Throat start
+            x_throat_end,     # Throat end
+            x_exit            # Nozzle exit
+        ]
+
+        y_crit = [
+            self.chmbR,       # Chamber radius
+            self.chmbR,       # Chamber radius
+            self.throatR,     # Throat radius
+            self.throatR,     # Throat radius
+            self.exitR        # Exit radius
+        ]
+
+        data = np.column_stack((x_crit, y_crit))
+        np.savetxt(
+            filename,
+            data,
+            delimiter=",",
+        )

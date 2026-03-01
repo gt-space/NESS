@@ -24,12 +24,12 @@ display_regen_contour_plot = False
 display_regen_outputs = False
 display_nozzle_mesh = False
 show_nozzle_plot = True
-export_nozzle = True
+export_nozzle = False
 export_regen_chans = False
 show_bartz_plot = True 
-export_bartz_data = True 
+export_bartz_data = False 
 show_gas_temp_plot = True
-export_gas_temps = True
+export_gas_temps = False
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
