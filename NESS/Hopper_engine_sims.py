@@ -24,7 +24,7 @@ display_regen_contour_plot = False
 display_regen_outputs = False
 display_nozzle_mesh = False
 show_nozzle_plot = True
-export_nozzle = False
+export_nozzle = True
 export_regen_chans = False
 show_bartz_plot = True 
 export_bartz_data = False 
@@ -182,7 +182,7 @@ if export_nozzle:
     if bell:
         engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
     else:
-        conical_engine.saveContour(filename="Hopper Engine Contour 550 lbf ConicalV1.csv")
+        conical_engine.saveContour(filename="Hopper Engine Contour 550 lbf ConicalV2.txt")
 
 #if export_HTC_hg:
 

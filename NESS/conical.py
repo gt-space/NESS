@@ -65,7 +65,7 @@ class conicalContour:
         plt.legend()
         plt.show()
 
-    def saveContour(self, filename="conical_contourv2.csv"):
+    def saveContour(self, filename="conical_contourv2.txt"):
         contAngle_rad = np.radians(self.contAngle)
         expAngle_rad = np.radians(self.expAngle)
         x_throat_start = -self.throatL / 2
