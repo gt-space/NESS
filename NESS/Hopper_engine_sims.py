@@ -27,9 +27,9 @@ show_nozzle_plot = True
 export_nozzle = True
 export_regen_chans = False
 show_bartz_plot = True 
-export_bartz_data = False 
+export_bartz_data = True 
 show_gas_temp_plot = True
-export_gas_temps = False
+export_gas_temps = True
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -47,9 +47,9 @@ numPts = 100
 ### --- Conical Engine Inputs --- ###
 chmbR = 1.35 # in
 chmbL = 4.066 # in, cylindrical portion of chamber
-contAngle = 30 # degrees
+contAngle = 45 # degrees
 throatR = 0.603 # in
-throatL = 0.5 # in
+throatL = .25 # in
 exit_angle = 15 # degrees
 exitR = 1.151 # in
 
@@ -153,7 +153,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("Hopper_Bartz_HTC_550lbf_ConicalV1.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("Hopper_Bartz_HTC_550lbf_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
@@ -166,7 +166,7 @@ if show_gas_temp_plot:
 if export_gas_temps:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.T))
-    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV1.csv", data, delimiter=",", header="Y Position (in), Gas Temperature (K)", comments="")
+    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="Y Position (in), Gas Temperature (K)", comments="")
 
 ### --- PLOT OUTPUTS ---
 
@@ -182,7 +182,7 @@ if export_nozzle:
     if bell:
         engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
     else:
-        conical_engine.saveContour(filename="Hopper Engine Contour 550 lbf ConicalV2.txt")
+        conical_engine.saveContour(filename="Hopper Engine Contour 550 lbf ConicalV3.txt")
 
 #if export_HTC_hg:
 
