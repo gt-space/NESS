@@ -49,7 +49,7 @@ chmbR = 1.35 # in
 chmbL = 4.066 # in, cylindrical portion of chamber
 contAngle = 45 # degrees
 throatR = 0.603 # in
-throatL = .25 # in
+throatL = 1/8 # in
 exit_angle = 15 # degrees
 exitR = 1.151 # in
 
