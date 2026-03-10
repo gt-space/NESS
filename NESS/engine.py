@@ -7,7 +7,6 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-from conical import conicalContour
 
 from rocketisp.geometry import Geometry
 from rocketisp.efficiencies import Efficiencies
@@ -80,9 +79,11 @@ class Engine:
         self.Contour_z = [-self.R.geomObj.Lcham] + self.R.geomObj.nozObj.abs_zContour
         self.Contour_r = [self.R.geomObj.Rinj] + self.R.geomObj.nozObj.abs_rContour
 
-        if self.bell == False:
-            my_conical = conicalContour(self.chmbR, self.chmbL, self.contAngle, self.throatR, self.throatL, self.expAngle, self.exitR, self.numPts)
-            self.Contour_z, self.Contour_r = my_conical.makeContour()
+        if self.bell == True:
+            self.Contour_z = [-self.R.geomObj.Lcham] + self.R.geomObj.nozObj.abs_zContour
+            self.Contour_r = [self.R.geomObj.Rinj] + self.R.geomObj.nozObj.abs_rContour
+        else:
+            self.Contour_z, self.Contour_r = self.makeConicalContour()
         
         self.Contour_z, self.Contour_r, self.throat_ind, self.chamberEnd_ind = self.resample_nozzle_contour(
         z_contour = self.Contour_z, r_contour = self.Contour_r, numPts = self.numPts, verbose=verbose)        
@@ -90,6 +91,11 @@ class Engine:
         print(f"Chamber End Ind: {self.chamberEnd_ind}")
         print(f"Throat Ind: {self.throat_ind}")
         
+        if self.bell == True:
+            self.At = self.R.geomObj.At
+        else:
+            self.At = np.pi * (self.throatR ** 2)
+
         self.At = self.R.geomObj.At     
         self.Dt = np.sqrt((4 / np.pi) * self.At) * 0.0254 # [in] --> [m]
         self.eps = self.R.geomObj.eps
@@ -97,6 +103,42 @@ class Engine:
         self.r_up_throat = self.R.geomObj.RupThroat * 0.0254 # [in] --> [m]
         self.fu_mdot = self.R.coreObj.wdotFl * 0.453592
         self.ox_mdot = self.R.coreObj.wdotOx * 0.453592
+
+    def makeConicalContour(self):
+        if self.chmbR is None or self.throatR is None:
+            raise ValueError("You set bell=False but did not provide the conical dimensions")
+
+        contAngle_rad = np.radians(self.contAngle)
+        expAngle_rad = np.radians(self.expAngle)
+
+        x_throat_start = -self.throatL / 2
+        x_throat_end = self.throatL / 2
+
+        x_length_conv = (self.chmbR - self.throatR) / np.tan(contAngle_rad)
+        x_chamber_end = x_throat_start - x_length_conv
+
+        x_chamber_start = x_chamber_end - self.chmbL
+
+        x_length_div = (self.exitR - self.throatR) / np.tan(expAngle_rad)
+        x_exit = x_throat_end + x_length_div
+
+        z_coords = np.linspace(x_chamber_start, x_exit, self.numPts)
+        temp_r_coords = []
+
+        for x in z_coords:
+            if x <= x_chamber_end:
+                y = self.chmbR
+            elif x <= x_throat_start:
+                m = -np.tan(contAngle_rad)
+                y = self.chmbR + m * (x - x_chamber_end)
+            elif x <= x_throat_end:
+                y = self.throatR
+            else:
+                m = np.tan(expAngle_rad)
+                y = self.throatR + m * (x - x_throat_end)
+            temp_r_coords.append(y)
+
+        return z_coords, np.array(temp_r_coords)
 
     def calcGasProperties(self, frozen=1):
         # Area Ratio (A / A*) - DONE
@@ -235,13 +277,34 @@ class Engine:
 
     def exportGeometry(self, filename):
         # Export the nozzle contour as [X, Y] coordinates in a .txt file for import into CAD.
-        
-        x = self.Contour_r
-        y = [-n for n in self.Contour_z]
+        if self.bell:
+            x = self.Contour_r
+            y = [-n for n in self.Contour_z]
 
-        with open(filename + '.txt', "w") as f:
-            for xi, yi in zip(x, y):
-                f.write(f"{xi:.6f}in\t{yi:.6f}in\t0in\n")
+            with open(filename + '.txt', "w") as f:
+                for xi, yi in zip(x, y):
+                    f.write(f"{xi:.6f}in\t{yi:.6f}in\t0in\n")
+        else:
+            # Conical nozzle: export only the 5 critical points
+            z = np.array(self.Contour_z)*-1
+            r = np.array(self.Contour_r)
+
+            chamber_mask = np.isclose(r, self.chmbR, rtol=1e-6, atol=1e-6)
+            idx_chamber_end = np.where(chamber_mask)[0][-1]
+
+            throat_mask = np.isclose(r, self.throatR, rtol=1e-6, atol=1e-6)
+            throat_indices = np.where(throat_mask)[0]
+            idx_throat_start = throat_indices[0]
+            idx_throat_end = throat_indices[-1]
+
+            crit_indices = [0, idx_chamber_end, idx_throat_start, idx_throat_end, len(z) - 1]
+
+            x_crit = r[crit_indices]
+            y_crit = [-n for n in z[crit_indices]]
+            
+            with open(filename + '.txt', "w") as f:
+                for xi, yi in zip(x_crit, y_crit):
+                    f.write(f"{xi:.6f}in\t{yi:.6f}in\t0in\n")
 
     def solveAreaMach(self, tol=1e-8):
         """
