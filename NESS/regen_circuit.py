@@ -49,7 +49,7 @@ class RegenCircuit:
 
         # Check that the inputted regen geometry is compatible with the Contour.
         self.regen_geometry(
-            r_ch=self.engine.r_ch,
+            r_throat=self.engine.r_throat,
             t_w=self.t_w,
             N=self.N,
             f_w=self.f_w,
@@ -152,7 +152,7 @@ class RegenCircuit:
 
         # Gnielinksi
         Nu = ((f_d / 8) * (Re - 1000) * Pr) / (1 + 12.7 * ((f_d/8)**(1/2)) * (Pr**(2/3) - 1)) # Nusselt Number
-        h_l = (Nu * fluid.k) / (D_h * 17)  # Coolant HTC
+        h_l = (Nu * fluid.k) / (D_h)  # Coolant HTC
 
         # Dittus-Boelter
         Nu_db = 0.023 * (Re**(0.8)) * (Pr**0.4)
@@ -183,6 +183,7 @@ class RegenCircuit:
 
     def thermal_network(
         self,
+        r_eng,
         t_w, 
         c_w,
         dz,
@@ -223,11 +224,22 @@ class RegenCircuit:
         else:
             TypeError("1 Input must be defined for the function thermal_network.")
 
-        A_ch = c_w * dz
-        A_ch_eff = A_ch
+        ## Fin Effective Area Calculations ##
+        # Single Fin #
+        m = math.sqrt((h_c * (2 * self.f_w + 2 * dz)) / (material.k * self.f_w * dz))
+        eta_f = np.tanh(m * self.C_h)
 
-        R_hghw = 1 / (h_hg * A_ch_eff)
-        R_wall = t_w / (material.k * A_ch)
+        # Multi-Fin #
+        A_b = self.N * c_w * dz
+        A_hwall_ch = (2 * np.pi * r_eng * dz) / self.N
+        A_f = 2 * self.N * self.C_h * dz
+        A_t = A_b + A_f
+        eta_o = (A_b + eta_f * A_f) / A_t
+        A_ch_eff = (eta_o * A_t) / self.N
+
+        # Thermal Resistances
+        R_hghw = 1 / (h_hg * A_hwall_ch)
+        R_wall = t_w / (material.k * A_hwall_ch)
         R_cwc = 1 / (h_c * A_ch_eff)
         R_tot = R_hghw + R_wall + R_cwc
 
@@ -263,7 +275,7 @@ class RegenCircuit:
         T_hw = output[T_hw]
         qdot = output[qdot]
 
-        return T_hg, T_c, T_cw, T_hw, qdot
+        return T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff
     
     def solve_circuit(
         self,
@@ -275,7 +287,7 @@ class RegenCircuit:
         # Set fluid inlet position by default to bottom of nozzle
         if circuit_inlet is None:
             circuit_inlet = len(self.engine.Contour_z) - 1
-            circuit_inlet_pos = self.engine.Contour_z[circuit_inlet]
+            circuit_inlet_pos = self.engine.Contour_z[circuit_inlet] * 0.0254 # [in] -- > [m]
             circuit_outlet = 0
 
             print(circuit_inlet)
@@ -291,8 +303,6 @@ class RegenCircuit:
         dz = (circuit_inlet_pos - (-self.engine.Contour_z[0] * 0.0254)) / self.engine.numPts
         dr = np.diff(self.engine.Contour_r * 0.0254)
         ds = np.sqrt(dz**2 + dr**2)
-
-        print(dz)
 
         # repeat end value so arrays have same shapes
         ds_end = ds[-1]
@@ -317,7 +327,7 @@ class RegenCircuit:
         # T and P Tracker
         P_c = inlet_pressure
         T_c = inlet_T_c
-        '''
+        
         for i in range(len(self.engine.T)):
             h_hg = self.bartz(
                 engine=self.engine,
@@ -330,19 +340,10 @@ class RegenCircuit:
                 M=self.engine.M[i],
                 T_hg=self.engine.T[i]
             )
-
-            self.h_hg_arr = np.append(self.h_hg_arr, h_hg)
-
-        plt.figure()
-        plt.title("Bartz Testing")
-        plt.xlabel("Axial Position (in)")
-        plt.ylabel("HTC (W/m^2-K)")
-        plt.plot(self.engine.Contour_z, self.h_hg_arr)
-        plt.show()
-        '''
-
+        
         # Get Boiling Point
-        self.coolant_boiling = PropsSI("T", "P", P_c, "Q", 0, self.coolantName)
+        #self.coolant_boiling = PropsSI("T", "P", P_c, "Q", 0, self.coolantName)
+        self.coolant_boiling = 670 # K, hardcoded
         print(f" Coolant BP : {self.coolant_boiling} K")
         
         for i in tqdm(range(circuit_inlet, circuit_outlet - 1, -1)):
@@ -377,7 +378,8 @@ class RegenCircuit:
             print(f"Coolant HTC : {h_c} W/m^2-K")
 
 
-            T_hg, T_c, T_cw, T_hw, qdot = self.thermal_network(
+            T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff = self.thermal_network(
+                r_eng=self.engine.Contour_r[i] * 0.0254,
                 t_w=self.t_w,
                 c_w=self.C_w,
                 dz=ds[i],
@@ -417,7 +419,7 @@ class RegenCircuit:
 
             # Boiling Check
             if T_c > self.coolant_boiling:
-                print(f" === Coolant boiled at {round(self.coolant_boiling, 2)} K!")
+                raise ValueError(f" === Coolant boiled at {round(self.coolant_boiling, 2)} K!")
                 break
             
             # Append/Update
@@ -432,6 +434,7 @@ class RegenCircuit:
             self.DP_arr = np.append(DP, self.DP_arr)
             self.Re = np.append(Re, self.Re)
             #break
+            
 
     def calc_DP(
         self,
@@ -489,7 +492,7 @@ class RegenCircuit:
 
     def regen_geometry(
         self,
-        r_ch,
+        r_throat,
         t_w,
         N = None,
         f_w = None,
@@ -513,21 +516,23 @@ class RegenCircuit:
         else:
             TypeError("2 Inputs must be defined for the function regen_geometry.")
 
-
-        eq1 = sp.Eq(f_w, ((2*np.pi*(r_ch + t_w)) / N) - C_w)
+        r_throat = r_throat * 0.0254 # [in] --> [m]
+        eq1 = sp.Eq(f_w, ((2*np.pi*(r_throat + t_w)) / N) - C_w)
 
         eqns = [eq1]
         vars_all = [N, f_w, C_w]
 
         output = solve_system(eqns, vars_all, inputs)
-        
         if output[f_w] <= 0:
-            print("Fin Width is negative or 0. Reduce N OR C_w")
+            raise ValueError(f"ERROR : Fin Width ({round(output[f_w] * 1000, 3)} mm) is negative or 0. Reduce N ({output[N]}) OR C_w ({output[C_w] * 1000} mm)")
 
         # Reset all variables
         self.f_w = output[f_w]
         self.N = output[N]
         self.C_w = output[C_w]
+
+        print(f"Fin Width: {self.f_w}")
+        print(f"Throat Radius: {r_throat}")
 
         return output
 
@@ -1003,6 +1008,7 @@ class RegenCircuit:
         plt.legend()
 
         # Heat Transfer Coefficients --- #
+        print(f"Hg Length: {len(self.h_hg_arr)}")
         plt.figure()
         plt.plot(self.engine.Contour_z, self.h_hg_arr, label='Hot Gas HTC')
         plt.plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC')
@@ -1014,9 +1020,16 @@ class RegenCircuit:
         # Unit conversions and calculations prior to printing
         self.channel_DP = (self.P_c_arr[-1] - self.P_c_arr[0]) / 6894.76 # Pa
         boiling_temp_margin = self.coolant_boiling - max(self.T_c_arr)
+        coolant = Fluid("T", self.T_c_arr[-1], "P", self.T_c_arr[-1], self.coolantName)
+        rho1 = coolant.rho
+        coolant = Fluid("T", self.T_c_arr[0], "P", self.T_c_arr[0], self.coolantName)
+        rho2 = coolant.rho
+        avg_rho = (rho1 + rho2) / 2
+        self.chan_CdA = (self.chan_mdot / (np.sqrt(2 * avg_rho * (self.P_c_arr[-1] - self.P_c_arr[0])))) * 1000000
 
         #### ---- SCALAR OUTPUTS ---- ####
         print("\n#### ---- REGEN CIRCUIT OUTPUTS ---- ####")
+        print(f"Channel CdA [mm^2]: {round(self.chan_CdA, 3)}")
         print(f"Channel Coolant Mdot [kg/s]: {round(self.chan_mdot, 4)}")
         print(f"Total Coolant Mdot [kg/s]: {round(self.tot_coolant_mdot, 3)}")
         print(f"Channel DP [psid]: {round(self.channel_DP, 2)}")

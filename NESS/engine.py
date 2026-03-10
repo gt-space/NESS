@@ -85,6 +85,7 @@ class Engine:
         self.Dt = np.sqrt((4 / np.pi) * self.At) * 0.0254 # [in] --> [m]
         self.eps = self.R.geomObj.eps
         self.r_ch = self.Contour_r[0]
+        self.r_throat = self.Contour_r[self.throat_ind]
         self.r_up_throat = self.R.geomObj.RupThroat * 0.0254 # [in] --> [m]
         self.fu_mdot = self.R.coreObj.wdotFl * 0.453592
         self.ox_mdot = self.R.coreObj.wdotOx * 0.453592

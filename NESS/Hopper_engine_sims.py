@@ -16,29 +16,30 @@ import matplotlib.pyplot as plt
 start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
-design_engine = True
-design_regen = True
-display_regen_contour_plot = False
-display_regen_outputs = False
-display_nozzle_mesh = False
-show_nozzle_plot = False
-export_nozzle = False
-export_regen_chans = False
-show_bartz_plot = False 
-export_bartz_data = True 
-show_gas_temp_plot = False
-export_gas_temps = True
+design_engine = True                 # Design engine contour and performance calculations
+design_regen = True                  # Solve regen circuit and performance analysis
+display_regen_contour_plot = True   # Output Plot of Regen Channels
+display_regen_outputs = True        # Show plots of regen circuit
+display_nozzle_mesh = False           # Display mesh of the contour
+show_nozzle_plot = False              # Show engine contour plot
+export_nozzle = False                # Export Nozzle as .txt to CAD    
+export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
+show_bartz_plot = False               # Show Plot of Bartz HTC
+export_bartz_data = False            # Export Bartz HTC to a Excel file
+show_gas_temp_plot = False            # Show Plot of Gas Temperatures along the contour
+export_gas_temps = False             # Export Gas Temps to an Excel file
+show_engine_perf_outputs = False     # Show Engine Performance Outputs
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
 fuName = "Kerosene"  # Jet-A
 oxName = "LOX"
-thrust = 550 # [lbf] --> [N]
+thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
-MRcore = 2
+MRcore = 1.8
 CR = 5
-Lstar = 30 # in
+Lstar = 40 # in
 cstarEff = 0.85
 numPts = 100
 
@@ -73,10 +74,10 @@ if design_engine:
 
 ### --- REGEN CIRCUIT INPUTS --- ###
 t_w = 1 / 1000 # [mm] --> [m]
-N = 60
-C_w = 1.5 / 1000 # [mm] --> [m]
+N = 30
+C_w = 1 / 1000 # [mm] --> [m]
 C_h = 2.5 / 1000 # [mm] --> [m]
-coolantName = "Ethanol"
+coolantName = "n-Dodecane"
 tot_coolant_mdot = engine.fu_mdot # kg/s
 inlet_T_c = 293 # [K]
 inlet_P_c = 420 * 6894.7 # [psia] --> [Pa]
@@ -158,10 +159,9 @@ if export_nozzle:
 
 #if export_HTC_hg:
 
-
-print(engine.R.get_summ_str())
-
-#plt.show()
+# Show Engine Performance Outputs
+if show_engine_perf_outputs:
+    print(engine.R.get_summ_str())
 
 ### --- OUTPUTS --- ###
 
