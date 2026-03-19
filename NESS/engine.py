@@ -96,7 +96,6 @@ class Engine:
         else:
             self.At = np.pi * (self.throatR ** 2)
 
-        self.At = self.R.geomObj.At     
         self.Dt = np.sqrt((4 / np.pi) * self.At) * 0.0254 # [in] --> [m]
         self.eps = self.R.geomObj.eps
         self.r_ch = self.Contour_r[0]
@@ -485,13 +484,27 @@ class Engine:
         z_throat_exact = z_contour[throat_idx_orig]
         r_throat_exact = r_contour[throat_idx_orig]
         
-        # Separate chamber (first 2 points) from nozzle (remaining points)
-        z_chamber = z_contour[:2]
-        r_chamber = r_contour[:2]
-        r_chamber_avg = np.mean(r_chamber)
+        # Find the end of the flat chamber dynamically
+        # It's the last point that has the exact same radius as the injector face
+        r_inj = r_contour[0]
+        chamber_mask = np.isclose(r_contour, r_inj, rtol=1e-5, atol=1e-5)
         
-        z_nozzle = z_contour[1:]
-        r_nozzle = r_contour[1:]
+        # Find the last contiguous True value from the start
+        chamber_end_idx_orig = 0
+        for i in range(len(chamber_mask)):
+            if chamber_mask[i]:
+                chamber_end_idx_orig = i
+            else:
+                break
+                
+        # Separate chamber from nozzle using the true dynamic index
+        z_chamber = [z_contour[0], z_contour[chamber_end_idx_orig]]
+        r_chamber = [r_contour[0], r_contour[chamber_end_idx_orig]]
+        r_chamber_avg = np.mean(r_chamber)
+
+        z_nozzle = z_contour[chamber_end_idx_orig:]
+        r_nozzle = r_contour[chamber_end_idx_orig:]
+
         
         # Calculate arc lengths
         chamber_length = abs(z_chamber[1] - z_chamber[0])

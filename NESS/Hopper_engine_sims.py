@@ -17,18 +17,18 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True
-bell = True
+bell = False
 design_regen = True
 display_regen_contour_plot = False
 display_regen_outputs = False
 display_nozzle_mesh = False
 show_nozzle_plot = True
-export_nozzle = True
+export_nozzle = False
 export_regen_chans = False
 show_bartz_plot = True 
 export_bartz_data = True 
 show_gas_temp_plot = True
-export_gas_temps = True
+export_gas_temps = False
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -149,7 +149,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("Hopper_Bartz_HTC_550lbf_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
