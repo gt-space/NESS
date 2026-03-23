@@ -11,7 +11,6 @@ import numpy as np
 from engine import Engine
 import time
 import matplotlib.pyplot as plt
-from conical import conicalContour
 
 ### --- RUNTIME TRACKER --- ###
 start_time = time.time()
@@ -85,9 +84,6 @@ if design_engine:
         throatL=throatL, 
         expAngle=exit_angle, 
         exitR=exitR)
-    conical_engine = conicalContour(chmbR=chmbR, chmbL=chmbL, contAngle=contAngle, 
-    throatR=throatR, throatL=throatL, expAngle=exit_angle, exitR=exitR, numpts=numPts)
-    conical_engine.makeContour()
               
 
 # Gas Props Testing
@@ -153,7 +149,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("Hopper_Bartz_HTC_550lbf_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
@@ -171,18 +167,25 @@ if export_gas_temps:
 ### --- PLOT OUTPUTS ---
 
 # Plot Engine Contour
+# Plot Engine Contour
 if show_nozzle_plot:
     if bell:
-        engine.R.geomObj.plot_geometry( title=f'Hopper Engine Bell Nozzle Profile - {thrust} lbf', show_grid=True )
-        engine.R.geomObj.plot_geometry( title=f'Hopper Engine Profile - {thrust} lbf', show_grid=True )
+        engine.R.geomObj.plot_geometry(title=f'Hopper Engine Profile - {thrust} lbf', show_grid=True)
     else:
-        conical_engine.plotContour()
+        plt.figure(figsize=(10, 5))
+        plt.plot(engine.Contour_z, engine.Contour_r, color='blue')
+        plt.plot(engine.Contour_z, -np.array(engine.Contour_r), color='blue')
+        plt.plot([engine.Contour_z[0], engine.Contour_z[-1]], [0, 0], 'k--', linewidth=1)
+        plt.title(f'Hopper Engine Profile - {thrust} lbf (Conical)')
+        plt.xlabel('Axial Distance (in)')
+        plt.ylabel('Radial Distance (in)')
+        plt.grid()
+        plt.axis('equal')
+        plt.show()
 
 if export_nozzle:
-    if bell:
-        engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
-    else:
-        conical_engine.saveContour(filename="Hopper Engine Contour 550 lbf ConicalV3.txt")
+    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
+
 
 #if export_HTC_hg:
 
