@@ -1,4 +1,3 @@
-
 ## --- ENGINE.PY --- ###
 # Define an engine with the class Engine to size the contour and calculate performance parameters.
 
@@ -29,7 +28,6 @@ from scipy.interpolate import interp1d
 # 10. Gamma
 # 11. Molecular Weight
 # 12. Thermal Conductivity (k)
-
 
 class Engine:
 

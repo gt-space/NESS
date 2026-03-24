@@ -6,9 +6,13 @@ Liquid rocket engine sizing and regenerative cooling analysis and design. It can
 ## Features
 - Design an engine contour and get performance values (using RocketIsp)
 - Design the thermals/fluid of regenerative cooling circuit
+
+## Future Features
+- Basic film cooling model 
+- Variable area regen coolant channels
 - Stress analysis on liner hot wall
 - Perform parametric/sensitivity studies on channel geometry to analyze liner thermal/fluids behavior
-- Basic film cooling model 
+- Two-pass cooling
 
 RocketIsp is used for all performance calculations. See those docs here - https://rocketisp.readthedocs.io/en/latest/ 
 
