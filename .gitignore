@@ -5,8 +5,3 @@ __pycache__/
 # Ignore venv
 venv/
 
-# Ignore engineDesigner - used for debugging
-engineDesigner_v5.0/
-
-# Ignore hopper :(
-hopper/
