@@ -342,7 +342,7 @@ class RegenCircuit:
             )
         
         # Get Boiling Point
-        self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=True)
+        self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
         print(f" Coolant BP : {self.coolant_boiling} K")
         
         for i in tqdm(range(circuit_inlet, circuit_outlet - 1, -1)):
@@ -1010,6 +1010,7 @@ class RegenCircuit:
         self       
     ):
         #### ---- PLOTS ---- ####
+        boiling_limit = self.coolant_boiling
         coolant_rho_arr = np.array([])
         for T_val, P_val in zip(self.T_c_arr, self.P_c_arr):
             rho = PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
@@ -1018,7 +1019,7 @@ class RegenCircuit:
         # ---- All Temps ---- #
         plt.figure()
 
-        # Regen Circuit Temps
+        # --- Regen Circuit Temps --- #
         plt.title("Regen Circuit Temperatures")
         plt.xlabel("Axial Position [m]")
         plt.ylabel("Temperature [K]")
@@ -1026,6 +1027,7 @@ class RegenCircuit:
         plt.plot(self.engine.Contour_z, self.T_hw_arr, color='r', label='Hot Wall Temp')
         plt.plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
         plt.plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
+        plt.axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
         plt.legend()
 
         # Temp Limits
@@ -1043,6 +1045,7 @@ class RegenCircuit:
 
         plt.plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
         plt.plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
+        plt.axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
         plt.legend()
         
         # Temp Limits
