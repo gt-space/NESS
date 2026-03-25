@@ -1010,6 +1010,10 @@ class RegenCircuit:
         self       
     ):
         #### ---- PLOTS ---- ####
+        coolant_rho_arr = np.array([])
+        for T_val, P_val in zip(self.T_c_arr, self.P_c_arr):
+            rho = PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
+            coolant_rho_arr = np.append(coolant_rho_arr, rho)
 
         # ---- All Temps ---- #
         plt.figure()
@@ -1084,6 +1088,14 @@ class RegenCircuit:
         plt.title("Coolant Velocities along Engine")
         plt.xlabel("Axial Position [m]")
         plt.ylabel("Velocity [m/s]")
+        plt.legend()
+
+        # --- Coolant Density --- #
+        plt.figure()
+        plt.plot(self.engine.Contour_z, coolant_rho_arr, label='Coolant Density')
+        plt.title("Coolant Density along Engine")
+        plt.xlabel("Axial Position [m]")
+        plt.ylabel("Density [kg/m^3]")
         plt.legend()
 
         # Heat Transfer Coefficients --- #
