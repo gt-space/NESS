@@ -342,8 +342,7 @@ class RegenCircuit:
             )
         
         # Get Boiling Point
-        #self.coolant_boiling = PropsSI("T", "P", P_c, "Q", 0, self.coolantName)
-        self.coolant_boiling = 670 # K, hardcoded
+        self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=True)
         print(f" Coolant BP : {self.coolant_boiling} K")
         
         for i in tqdm(range(circuit_inlet, circuit_outlet - 1, -1)):
@@ -454,7 +453,7 @@ class RegenCircuit:
 
         # Try to compute subcritical saturation boiling temperature at this pressure.
         try:
-            subcritical_boiling_point = PropsSI("T", "P", P_c, "Q", 0, fluid.fluid)  # [K]
+            subcritical_boiling_point = PropsSI("T", "P", P_c, "Q", 0, fluid)  # [K]
             # Subcritical: reference limit is the saturation boiling point.
             if T_c <= subcritical_boiling_point:
                 return subcritical_boiling_point
@@ -474,7 +473,7 @@ class RegenCircuit:
 
         for T in T_candidates:
             try:
-                cp = PropsSI("C", "T", float(T), "P", float(P_c), fluid.fluid)  # [J/kg/K]
+                cp = PropsSI("C", "T", float(T), "P", float(P_c), self.coolantName)  # [J/kg/K]
                 if np.isfinite(cp):
                     cp_values.append(float(cp))
                     valid_T.append(float(T))
@@ -484,7 +483,7 @@ class RegenCircuit:
 
         if not cp_values:
             raise ValueError(
-                f"Could not compute Cp(T) sweep for fluid '{fluid.fluid}' at "
+                f"Could not compute Cp(T) sweep for fluid '{self.coolantName}' at "
                 f"P={P_c:.3e} Pa. No valid CoolProp states were found in the "
                 f"temperature sweep range."
             )
@@ -494,7 +493,7 @@ class RegenCircuit:
 
         if plot_cp_curve:
             plt.figure()
-            plt.plot(valid_T, cp_values, label=f"{fluid.fluid} Cp(T)")
+            plt.plot(valid_T, cp_values, label=f"{self.coolantName} Cp(T)")
             plt.axvline(
                 supercritical_boiling_point,
                 linestyle="--",

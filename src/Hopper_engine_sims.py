@@ -42,6 +42,7 @@ CR = 5
 Lstar = 40 # in
 cstarEff = 0.85
 numPts = 100
+bell = True
 
 ### --- Conical Engine Inputs --- ###
 chmbR = 1.35 # in
