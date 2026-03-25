@@ -181,7 +181,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
@@ -194,7 +194,7 @@ if show_gas_temp_plot:
 if export_gas_temps:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.T))
-    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="Y Position (in), Gas Temperature (K)", comments="")
+    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
 
 ### --- PLOT OUTPUTS ---
 
