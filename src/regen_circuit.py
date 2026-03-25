@@ -434,7 +434,87 @@ class RegenCircuit:
             self.DP_arr = np.append(DP, self.DP_arr)
             self.Re = np.append(Re, self.Re)
             #break
-            
+    
+    def calculate_boiling_point(
+        self,
+        P_c,
+        T_c,
+        fluid,
+        plot_cp_curve=False
+    ):
+        """
+        Determine a reference "boiling limit" temperature.
+
+        - If saturation at the given pressure exists, returns the saturated boiling point (Q=0)
+          and treats the current state as subcooled vs superheated based on `T_c`.
+        - If the state is supercritical (or saturation temperature cannot be computed), returns
+          the temperature at which Cp(T) peaks at this pressure (pseudocritical Cp peak).
+        - Reference Paper: https://www.osti.gov/servlets/purl/4159664
+        """
+
+        # Try to compute subcritical saturation boiling temperature at this pressure.
+        try:
+            subcritical_boiling_point = PropsSI("T", "P", P_c, "Q", 0, fluid.fluid)  # [K]
+            # Subcritical: reference limit is the saturation boiling point.
+            if T_c <= subcritical_boiling_point:
+                return subcritical_boiling_point
+        except Exception:
+            # If saturation data is unavailable, assume we're in (or near) supercritical regime.
+            subcritical_boiling_point = None
+
+        # Supercritical (or unable to compute saturation): use pseudocritical temperature
+        # where Cp(T) reaches its maximum at this pressure.
+        T_min = 200.0  # [K] broad sweep guard
+        T_max = 2000.0 # [K] broad sweep guard
+        n_samples = 200
+        T_candidates = np.linspace(T_min, T_max, n_samples)
+
+        cp_values = []
+        valid_T = []
+
+        for T in T_candidates:
+            try:
+                cp = PropsSI("C", "T", float(T), "P", float(P_c), fluid.fluid)  # [J/kg/K]
+                if np.isfinite(cp):
+                    cp_values.append(float(cp))
+                    valid_T.append(float(T))
+            except Exception:
+                # CoolProp can fail outside the fluid's valid domain for a given P.
+                continue
+
+        if not cp_values:
+            raise ValueError(
+                f"Could not compute Cp(T) sweep for fluid '{fluid.fluid}' at "
+                f"P={P_c:.3e} Pa. No valid CoolProp states were found in the "
+                f"temperature sweep range."
+            )
+
+        peak_idx = int(np.argmax(cp_values))
+        supercritical_boiling_point = valid_T[peak_idx]
+
+        if plot_cp_curve:
+            plt.figure()
+            plt.plot(valid_T, cp_values, label=f"{fluid.fluid} Cp(T)")
+            plt.axvline(
+                supercritical_boiling_point,
+                linestyle="--",
+                label=f"Cp peak T = {supercritical_boiling_point:.2f} K"
+            )
+            plt.scatter(
+                [supercritical_boiling_point],
+                [cp_values[peak_idx]],
+                zorder=3
+            )
+            plt.title(f"Cp vs Temperature at P={P_c/6894.7:.2f} psia")
+            plt.xlabel("Temperature [K]")
+            plt.ylabel("Cp [J/kg-K]")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+        return supercritical_boiling_point
+
 
     def calc_DP(
         self,
