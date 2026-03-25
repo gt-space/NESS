@@ -171,15 +171,45 @@ class RegenCircuit:
             print(f"Nusselt DB : {Nu_db}")
 
         return h_l
-    '''
-    def fin_eff(
-        self,
-    ):
-        eta_f = 
-
-        A_eff = 
     
-    '''
+    def calculate_stress(
+        self,
+        T_hw,
+        T_cw,
+        material,
+        qdot,
+        P_c,
+        P_hg,
+    ):
+        '''
+        Calculate the stress in the liner due to thermal gradient between the hot gas and coolant.
+        '''
+        # Update temperature-dependent material properties (if available).
+        # For hardcoded-only materials, this call leaves values unchanged.
+        mat_props = material.update_material_properties(T_hw)
+
+        E = mat_props.get("E", getattr(material, "E", None))
+        alpha = mat_props.get("alpha", getattr(material, "alpha", None))
+        v = mat_props.get("v", getattr(material, "v", None))
+        k = mat_props.get("k", getattr(material, "k", None))
+
+        if any(val is None for val in [E, alpha, v, k]):
+            raise ValueError(
+                "Material is missing required properties for stress calculation. "
+                "Need E, alpha, v, and k."
+            )
+
+        # Tangential Stress
+        sigma_pt = ((P_c - P_hg) / 2) * (self.C_w / self.t_w)**2
+        sigma_tt = (E * alpha * qdot * self.t_w) / (2 * (1 - v) * k)
+        sigma_t = sigma_pt + sigma_tt
+
+        # Longitudinal Stress
+        # pressure ignored maybe update later
+        sigma_tl = E * alpha * (T_hw - T_cw)
+        sigma_l = sigma_tl
+        
+        return sigma_pt, sigma_tt, sigma_t, sigma_tl, sigma_l
 
     def thermal_network(
         self,
@@ -312,17 +342,23 @@ class RegenCircuit:
         #print(dz)
         #print(ds)
 
-        # Initialize Arrays
-        self.T_hw_arr = np.array([])
-        self.T_cw_arr = np.array([])
-        self.T_c_arr = np.array([])
-        self.Qdot_arr = np.array([])
-        self.coolant_vel_arr = np.array([])
-        self.P_c_arr = np.array([])
-        self.h_hg_arr = np.array([])
-        self.h_c_arr = np.array([])
-        self.DP_arr = np.array([])
-        self.Re = np.array([])
+        # Initialize Arrays (preallocate once for faster writes).
+        n_stations = circuit_inlet - circuit_outlet + 1
+        self.T_hw_arr = np.empty(n_stations)
+        self.T_cw_arr = np.empty(n_stations)
+        self.T_c_arr = np.empty(n_stations)
+        self.Qdot_arr = np.empty(n_stations)
+        self.coolant_vel_arr = np.empty(n_stations)
+        self.P_c_arr = np.empty(n_stations)
+        self.h_hg_arr = np.empty(n_stations)
+        self.h_c_arr = np.empty(n_stations)
+        self.DP_arr = np.empty(n_stations)
+        self.Re = np.empty(n_stations)
+        self.sigma_pt = np.empty(n_stations)
+        self.sigma_tt = np.empty(n_stations)
+        self.sigma_t = np.empty(n_stations)
+        self.sigma_pl = np.empty(n_stations)
+        self.sigma_l = np.empty(n_stations)
 
         # T and P Tracker
         P_c = inlet_pressure
@@ -345,6 +381,7 @@ class RegenCircuit:
         self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
         print(f" Coolant BP : {self.coolant_boiling} K")
         
+        # Regen Circuit Loop
         for i in tqdm(range(circuit_inlet, circuit_outlet - 1, -1)):
             # calculate coolant fluid properties from (inlet pressure and T_c)
             # calculate coolant volume from channel geometry (C_w * C_h * dz)
@@ -388,6 +425,17 @@ class RegenCircuit:
                 T_hg=self.engine.T[i],
                 T_c=T_c
                 )
+            q_flux = qdot / ds[i] * ((2 * np.pi * self.engine.r_ch) / self.N) # W/m^2
+            
+            # Stress Calculations
+            sigma_pt, sigma_tt, sigma_t, sigma_pl, sigma_l = self.calculate_stress(
+                T_hw=T_hw,
+                T_cw=T_cw,
+                material=self.material,
+                qdot=q_flux,
+                P_c=P_c,
+                P_hg=self.engine.P[i] * 6894.76,
+            )
             
             '''
             print("Thermal Network Outputs")
@@ -421,17 +469,24 @@ class RegenCircuit:
                 raise ValueError(f" === Coolant boiled at {round(self.coolant_boiling, 2)} K!")
                 break
             
-            # Append/Update
-            self.T_hw_arr = np.append(T_hw, self.T_hw_arr)
-            self.T_cw_arr = np.append(T_cw, self.T_cw_arr)
-            self.T_c_arr = np.append(T_c_new, self.T_c_arr)
-            self.Qdot_arr = np.append(qdot, self.Qdot_arr)
-            self.coolant_vel_arr = np.append(coolant_vel, self.coolant_vel_arr)
-            self.P_c_arr = np.append(P_c_new, self.P_c_arr)
-            self.h_hg_arr = np.append(h_hg, self.h_hg_arr, )
-            self.h_c_arr = np.append(h_c, self.h_c_arr)
-            self.DP_arr = np.append(DP, self.DP_arr)
-            self.Re = np.append(Re, self.Re)
+            # Indexed update (faster than repeated np.append in loop).
+            out_idx = i - circuit_outlet
+            self.T_hw_arr[out_idx] = T_hw
+            self.T_cw_arr[out_idx] = T_cw
+            self.T_c_arr[out_idx] = T_c_new
+            self.Qdot_arr[out_idx] = qdot
+            self.coolant_vel_arr[out_idx] = coolant_vel
+            self.P_c_arr[out_idx] = P_c_new
+            self.h_hg_arr[out_idx] = h_hg
+            self.h_c_arr[out_idx] = h_c
+            self.DP_arr[out_idx] = DP
+            self.Re[out_idx] = Re
+            self.sigma_pt[out_idx] = sigma_pt
+            self.sigma_tt[out_idx] = sigma_tt
+            self.sigma_t[out_idx] = sigma_t
+            self.sigma_pl[out_idx] = sigma_pl
+            self.sigma_l[out_idx] = sigma_l
+
             #break
     
     def calculate_boiling_point(
@@ -1010,6 +1065,7 @@ class RegenCircuit:
         self       
     ):
         #### ---- PLOTS ---- ####
+        pa_to_ksi = 1.0 / 6894757.293168
         boiling_limit = self.coolant_boiling
         coolant_rho_arr = np.array([])
         for T_val, P_val in zip(self.T_c_arr, self.P_c_arr):
@@ -1069,6 +1125,7 @@ class RegenCircuit:
         plt.ylabel("Pressure [psia]")
         plt.legend()
 
+        '''
         # --- Qdot --- #
         plt.figure()
         plt.plot(self.engine.Contour_z, self.Qdot_arr, label='Qdot')
@@ -1076,6 +1133,7 @@ class RegenCircuit:
         plt.xlabel("Axial Position [m]")
         plt.ylabel("Qdot [J]")
         plt.legend()
+        '''
 
         # --- Re --- #
         plt.figure()
@@ -1099,6 +1157,33 @@ class RegenCircuit:
         plt.title("Coolant Density along Engine")
         plt.xlabel("Axial Position [m]")
         plt.ylabel("Density [kg/m^3]")
+        plt.legend()
+
+        # --- Wall Thermal Gradient --- #
+        plt.figure()
+        plt.plot(self.engine.Contour_z, self.T_hw_arr - self.T_cw_arr, label='Wall Thermal Gradient')
+        plt.title("Wall Thermal Gradient along Engine")
+        plt.xlabel("Axial Position [m]")
+        plt.ylabel("T_hw - T_cw [K]")
+        plt.legend()
+
+        # --- Tangential Stresses --- #
+        plt.figure()
+        plt.plot(self.engine.Contour_z, self.sigma_t * pa_to_ksi, label='Total Tangential Stress')
+        plt.plot(self.engine.Contour_z, self.sigma_pt * pa_to_ksi, label='Pressure Tangential Stress')
+        plt.plot(self.engine.Contour_z, self.sigma_tt * pa_to_ksi, label='Thermal Tangential Stress')
+        plt.title("Tangential Stresses along Engine")
+        plt.xlabel("Axial Position [m]")
+        plt.ylabel("Stress [ksi]")
+        plt.legend()
+
+        # --- Longitudinal Stresses --- #
+        plt.figure()
+        plt.plot(self.engine.Contour_z, self.sigma_l * pa_to_ksi, label='Total Longitudinal Stress')
+        plt.plot(self.engine.Contour_z, self.sigma_pl * pa_to_ksi, label='Thermal Longitudinal Stress')
+        plt.title("Longitudinal Stresses along Engine")
+        plt.xlabel("Axial Position [m]")
+        plt.ylabel("Stress [ksi]")
         plt.legend()
 
         # Heat Transfer Coefficients --- #

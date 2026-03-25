@@ -37,7 +37,7 @@ oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
-MRcore = 1.8
+MRcore = 1.6
 CR = 5
 Lstar = 40 # in
 cstarEff = 0.85
@@ -91,10 +91,10 @@ if design_engine:
 #engine.plot_gas_props()
 
 ### --- REGEN CIRCUIT INPUTS --- ###
-t_w = 1 / 1000 # [mm] --> [m]
-N = 30
+t_w = 0.75 / 1000 # [mm] --> [m]
+N = 27
 C_w = 1 / 1000 # [mm] --> [m]
-C_h = 2.5 / 1000 # [mm] --> [m]
+C_h = 3 / 1000 # [mm] --> [m]
 coolantName = "n-Dodecane"
 tot_coolant_mdot = engine.fu_mdot # kg/s
 inlet_T_c = 293 # [K]
