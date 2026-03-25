@@ -1062,139 +1062,153 @@ class RegenCircuit:
         return corners
 
     def outputs(
-        self       
+        self,
+        show_regen_temps=True,
+        show_cold_temps=True,
+        show_dp=True,
+        show_pressures=True,
+        show_qdot=True,
+        show_re=True,
+        show_coolant_density=True,
+        show_coolant_velocity=True,
+        show_wall_thermal_gradient=True,
+        show_tangential_stresses=True,
+        show_longitudinal_stresses=True,
+        show_htc=True,
     ):
         #### ---- PLOTS ---- ####
         pa_to_ksi = 1.0 / 6894757.293168
         boiling_limit = self.coolant_boiling
-        coolant_rho_arr = np.array([])
-        for T_val, P_val in zip(self.T_c_arr, self.P_c_arr):
-            rho = PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
-            coolant_rho_arr = np.append(coolant_rho_arr, rho)
+        coolant_rho_arr = np.array([
+            PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
+            for T_val, P_val in zip(self.T_c_arr, self.P_c_arr)
+        ])
 
-        # ---- All Temps ---- #
-        plt.figure()
+        if show_regen_temps or show_cold_temps:
+            fig, axs = plt.subplots(2, 1, figsize=(10, 9), sharex=True)
+            if show_regen_temps:
+                axs[0].set_title("Regen Circuit Temperatures")
+                axs[0].set_ylabel("Temperature [K]")
+                axs[0].plot(self.engine.Contour_z, self.engine.T, color='orange', label='Combustion Gas Temp')
+                axs[0].plot(self.engine.Contour_z, self.T_hw_arr, color='r', label='Hot Wall Temp')
+                axs[0].plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
+                axs[0].plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
+                axs[0].axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
+                axs[0].legend()
+            else:
+                axs[0].set_visible(False)
 
-        # --- Regen Circuit Temps --- #
-        plt.title("Regen Circuit Temperatures")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Temperature [K]")
-        plt.plot(self.engine.Contour_z, self.engine.T, color='orange', label='Combustion Gas Temp')
-        plt.plot(self.engine.Contour_z, self.T_hw_arr, color='r', label='Hot Wall Temp')
-        plt.plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
-        plt.plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
-        plt.axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
-        plt.legend()
+            if show_cold_temps:
+                axs[1].set_title("Regen Circuit Cold Side Temperatures")
+                axs[1].set_xlabel("Axial Position [m]")
+                axs[1].set_ylabel("Temperature [K]")
+                axs[1].plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
+                axs[1].plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
+                axs[1].axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
+                axs[1].legend()
+            else:
+                axs[1].set_visible(False)
+            fig.tight_layout()
 
-        # Temp Limits
-        #plt.axhline(self.T_hw_MAX, color='r', blinestyle='--')
-        #plt.axhline(self.T_cw_MAX, color='b', linestyle='--')
-        #plt.axhline(self.T_c_MAX, color='y', linestyle='--')
+        if show_dp or show_pressures:
+            fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+            if show_dp:
+                axs[0].plot(self.engine.Contour_z, self.DP_arr / 6894.7, label='Pressure Drop')
+                axs[0].set_title("Pressure Drop along Engine")
+                axs[0].set_ylabel("DP [psia]")
+                axs[0].legend()
+            else:
+                axs[0].set_visible(False)
 
-    
-        # ---- Cold Temps ---- #
-        plt.figure()
+            if show_pressures:
+                axs[1].plot(self.engine.Contour_z, self.engine.P, label='Chamber Static Pressure')
+                axs[1].plot(self.engine.Contour_z, self.P_c_arr / 6894.7, label='Coolant Pressure')
+                axs[1].set_title("Pressures along Engine")
+                axs[1].set_xlabel("Axial Position [m]")
+                axs[1].set_ylabel("Pressure [psia]")
+                axs[1].legend()
+            else:
+                axs[1].set_visible(False)
+            fig.tight_layout()
 
-        plt.title("Regen Circuit Cold Side Temperatures")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Temperature [K]")
+        if show_qdot or show_re or show_coolant_density or show_coolant_velocity:
+            fig, axs = plt.subplots(2, 2, figsize=(12, 9), sharex=True)
+            if show_qdot:
+                axs[0, 0].plot(self.engine.Contour_z, self.Qdot_arr, label='Qdot')
+                axs[0, 0].set_title("Radial Heat Flow")
+                axs[0, 0].set_ylabel("Qdot [J]")
+                axs[0, 0].legend()
+            else:
+                axs[0, 0].set_visible(False)
 
-        plt.plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
-        plt.plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
-        plt.axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
-        plt.legend()
-        
-        # Temp Limits
-        #plt.axhline(self.T_cw_MAX, color='b', linestyle='--')
-        #plt.axhline(self.T_c_MAX, color='y', linestyle='--')
-        
-        # ---- DP ---- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.DP_arr / 6894.7)
-        plt.title("Pressure Drop along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("DP [psia]")
-        plt.legend()
+            if show_re:
+                axs[0, 1].plot(self.engine.Contour_z, self.Re, label='Reynolds Number')
+                axs[0, 1].set_title("Coolant Re")
+                axs[0, 1].set_ylabel("Re [---]")
+                axs[0, 1].legend()
+            else:
+                axs[0, 1].set_visible(False)
 
-        # --- Pressures --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.engine.P, label='Chamber Static Pressure')
-        plt.plot(self.engine.Contour_z, self.P_c_arr / 6894.7, label='Coolant Pressure')
-        plt.title("Pressures along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Pressure [psia]")
-        plt.legend()
+            if show_coolant_density:
+                axs[1, 0].plot(self.engine.Contour_z, coolant_rho_arr, label='Coolant Density')
+                axs[1, 0].set_title("Coolant Density")
+                axs[1, 0].set_xlabel("Axial Position [m]")
+                axs[1, 0].set_ylabel("Density [kg/m^3]")
+                axs[1, 0].legend()
+            else:
+                axs[1, 0].set_visible(False)
 
-        '''
-        # --- Qdot --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.Qdot_arr, label='Qdot')
-        plt.title("Radial Heat Flow along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Qdot [J]")
-        plt.legend()
-        '''
+            if show_coolant_velocity:
+                axs[1, 1].plot(self.engine.Contour_z, self.coolant_vel_arr, label='Coolant Velocity')
+                axs[1, 1].set_title("Coolant Velocity")
+                axs[1, 1].set_xlabel("Axial Position [m]")
+                axs[1, 1].set_ylabel("Velocity [m/s]")
+                axs[1, 1].legend()
+            else:
+                axs[1, 1].set_visible(False)
+            fig.tight_layout()
 
-        # --- Re --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.Re, label='Reynolds Number')
-        plt.title("Coolant Re along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel(" Re [---]")
-        plt.legend()
+        if show_wall_thermal_gradient or show_tangential_stresses or show_longitudinal_stresses:
+            fig, axs = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
+            if show_wall_thermal_gradient:
+                axs[0].plot(self.engine.Contour_z, self.T_hw_arr - self.T_cw_arr, label='Wall Thermal Gradient')
+                axs[0].set_title("Wall Thermal Gradient")
+                axs[0].set_ylabel("T_hw - T_cw [K]")
+                axs[0].legend()
+            else:
+                axs[0].set_visible(False)
 
-        # --- Coolant Velocity --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.coolant_vel_arr, label='Coolant Velocity')
-        plt.title("Coolant Velocities along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Velocity [m/s]")
-        plt.legend()
+            if show_tangential_stresses:
+                axs[1].plot(self.engine.Contour_z, self.sigma_t * pa_to_ksi, label='Total Tangential Stress')
+                axs[1].plot(self.engine.Contour_z, self.sigma_pt * pa_to_ksi, label='Pressure Tangential Stress')
+                axs[1].plot(self.engine.Contour_z, self.sigma_tt * pa_to_ksi, label='Thermal Tangential Stress')
+                axs[1].set_title("Tangential Stresses")
+                axs[1].set_ylabel("Stress [ksi]")
+                axs[1].legend()
+            else:
+                axs[1].set_visible(False)
 
-        # --- Coolant Density --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, coolant_rho_arr, label='Coolant Density')
-        plt.title("Coolant Density along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Density [kg/m^3]")
-        plt.legend()
+            if show_longitudinal_stresses:
+                axs[2].plot(self.engine.Contour_z, self.sigma_l * pa_to_ksi, label='Total Longitudinal Stress')
+                axs[2].plot(self.engine.Contour_z, self.sigma_pl * pa_to_ksi, label='Thermal Longitudinal Stress')
+                axs[2].set_title("Longitudinal Stresses")
+                axs[2].set_xlabel("Axial Position [m]")
+                axs[2].set_ylabel("Stress [ksi]")
+                axs[2].legend()
+            else:
+                axs[2].set_visible(False)
+            fig.tight_layout()
 
-        # --- Wall Thermal Gradient --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.T_hw_arr - self.T_cw_arr, label='Wall Thermal Gradient')
-        plt.title("Wall Thermal Gradient along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("T_hw - T_cw [K]")
-        plt.legend()
-
-        # --- Tangential Stresses --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.sigma_t * pa_to_ksi, label='Total Tangential Stress')
-        plt.plot(self.engine.Contour_z, self.sigma_pt * pa_to_ksi, label='Pressure Tangential Stress')
-        plt.plot(self.engine.Contour_z, self.sigma_tt * pa_to_ksi, label='Thermal Tangential Stress')
-        plt.title("Tangential Stresses along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Stress [ksi]")
-        plt.legend()
-
-        # --- Longitudinal Stresses --- #
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.sigma_l * pa_to_ksi, label='Total Longitudinal Stress')
-        plt.plot(self.engine.Contour_z, self.sigma_pl * pa_to_ksi, label='Thermal Longitudinal Stress')
-        plt.title("Longitudinal Stresses along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("Stress [ksi]")
-        plt.legend()
-
-        # Heat Transfer Coefficients --- #
-        print(f"Hg Length: {len(self.h_hg_arr)}")
-        plt.figure()
-        plt.plot(self.engine.Contour_z, self.h_hg_arr, label='Hot Gas HTC')
-        plt.plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC')
-        plt.title("HTCs along Engine")
-        plt.xlabel("Axial Position [m]")
-        plt.ylabel("HTC [W/m^2-K]")
-        plt.legend()
+        if show_htc:
+            print(f"Hg Length: {len(self.h_hg_arr)}")
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(self.engine.Contour_z, self.h_hg_arr, label='Hot Gas HTC')
+            ax.plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC')
+            ax.set_title("HTCs along Engine")
+            ax.set_xlabel("Axial Position [m]")
+            ax.set_ylabel("HTC [W/m^2-K]")
+            ax.legend()
+            fig.tight_layout()
 
         # Unit conversions and calculations prior to printing
         self.channel_DP = (self.P_c_arr[-1] - self.P_c_arr[0]) / 6894.76 # Pa

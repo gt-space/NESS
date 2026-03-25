@@ -18,17 +18,35 @@ start_time = time.time()
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True                 # Design engine contour and performance calculations
 design_regen = True                  # Solve regen circuit and performance analysis
+
+# REGEN OUTPUT PLOT OPTIONS
 display_regen_contour_plot = True   # Output Plot of Regen Channels
 display_regen_outputs = True        # Show plots of regen circuit
-display_nozzle_mesh = False           # Display mesh of the contour
-show_nozzle_plot = False              # Show engine contour plot
+show_regen_temps = True             # Regen Circuit Temps plot
+show_cold_temps = True              # Cold Temps plot
+show_dp = True                      # DP plot
+show_pressures = True               # Pressures plot
+show_qdot = True                    # Qdot plot
+show_re = True                      # Re plot
+show_coolant_density = True         # Coolant density plot
+show_coolant_velocity = True        # Coolant velocity plot
+show_wall_thermal_gradient = True   # Wall thermal gradient plot
+show_tangential_stresses = True     # Tangential stresses plot
+show_longitudinal_stresses = True   # Longitudinal stresses plot
+show_htc = True                     # HTC plot
+
+# ENGINE / PERFORMANCE OUTPUTS
+display_nozzle_mesh = False         # Display mesh of the contour
+show_nozzle_plot = False            # Show engine contour plot
+show_bartz_plot = False             # Show Plot of Bartz HTC
+show_gas_temp_plot = False          # Show Plot of Gas Temperatures along the contour
+show_engine_perf_outputs = False    # Show Engine Performance Outputs
+
+# FILE EXPORT
 export_nozzle = False                # Export Nozzle as .txt to CAD    
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
-show_bartz_plot = False               # Show Plot of Bartz HTC
 export_bartz_data = False            # Export Bartz HTC to a Excel file
-show_gas_temp_plot = False            # Show Plot of Gas Temperatures along the contour
 export_gas_temps = False             # Export Gas Temps to an Excel file
-show_engine_perf_outputs = False     # Show Engine Performance Outputs
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -134,7 +152,20 @@ if design_regen:
     )
 
     if display_regen_outputs:
-        regen_circuit.outputs() # Plot regen circuit values
+        regen_circuit.outputs(
+            show_regen_temps=show_regen_temps,
+            show_cold_temps=show_cold_temps,
+            show_dp=show_dp,
+            show_pressures=show_pressures,
+            show_qdot=show_qdot,
+            show_re=show_re,
+            show_coolant_density=show_coolant_density,
+            show_coolant_velocity=show_coolant_velocity,
+            show_wall_thermal_gradient=show_wall_thermal_gradient,
+            show_tangential_stresses=show_tangential_stresses,
+            show_longitudinal_stresses=show_longitudinal_stresses,
+            show_htc=show_htc,
+        ) # Plot regen circuit values
 
     if export_regen_chans:
         regen_circuit.generate_single_channel_curves()
