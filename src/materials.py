@@ -8,12 +8,15 @@ class Material:
 
         if self.material_name == "Inconel 718":
             self.rho = 8190 # kg/m^3
+            self.E = 160E9 # Pa
             self.k = 11.4 # W/mK
-            self.Cp = 0.435 # J/kgK
+            self.Cp = 435 # J/kgK
             self.MeltingPoint = 1533 # K
-            #self.YTS =
+            self.v = 0.34
+            self.alpha = 24.8E-6 # m/m/C
+            #self.YTS = 
             #self.UTS = 
-            #self.E = 
+
         elif self.material_name == "Pure Copper":
             self.rho = 8960 # kg/m^3
             self.E = 110E9 # Pa
@@ -26,7 +29,7 @@ class Material:
         elif self.material_name == "AlSi10Mg":
             self.rho = 2670 # kg/m^3
             self.k = 130 # W/mK
-            self.E = 70e9 # Pa
+            self.E = 70E9 # Pa
             
             # Yield Stress vs. Temperature Lookup Table
             T = np.array([298.15, 323.15, 373.15, 423.15, 473.15, 523.15, 573.15, 623.15, 673.15]) # K

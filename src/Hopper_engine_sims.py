@@ -34,6 +34,15 @@ show_wall_thermal_gradient = True   # Wall thermal gradient plot
 show_tangential_stresses = True     # Tangential stresses plot
 show_longitudinal_stresses = True   # Longitudinal stresses plot
 show_htc = True                     # HTC plot
+show_bartz_sigma = True             # Bartz sigma subplot
+
+# BARTZ T_wg ROOT SOLVER OPTIONS
+T_wg_bracket = (500.0, 2500.0)      # [K] global bracket for root solve
+T_wg_residual_tol = 1e-2            # [K] residual tolerance for T_wg - T_hw
+use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
+fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
+T_wg_scan_samples = 2             # Samples across bracket to detect multiple roots
+sigma_clamp = (0.5, 1.0)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
 
 # ENGINE / PERFORMANCE OUTPUTS
 display_nozzle_mesh = False         # Display mesh of the contour
@@ -41,6 +50,7 @@ show_nozzle_plot = False            # Show engine contour plot
 show_bartz_plot = False             # Show Plot of Bartz HTC
 show_gas_temp_plot = False          # Show Plot of Gas Temperatures along the contour
 show_engine_perf_outputs = False    # Show Engine Performance Outputs
+show_gas_props = False              # Generate plots of ALL CEA gas properties along the contour            
 
 # FILE EXPORT
 export_nozzle = False                # Export Nozzle as .txt to CAD    
@@ -50,17 +60,18 @@ export_gas_temps = False             # Export Gas Temps to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
-fuName = "Kerosene"  # Jet-A
+fuName = "Ethanol"  # Jet-A
 oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
-MRcore = 1.6
+MRcore = 1.8
 CR = 5
-Lstar = 40 # in
+Lstar = 30 # in
 cstarEff = 0.85
 numPts = 100
 bell = True
+frozen = True
 
 ### --- Conical Engine Inputs --- ###
 chmbR = 1.35 # in
@@ -92,6 +103,7 @@ if design_engine:
         CR = CR,
         Lstar = Lstar,
         cstarEff=cstarEff,
+        frozen=frozen,
         name=name,
         numPts=numPts,
         verbose=display_nozzle_mesh,
@@ -105,18 +117,19 @@ if design_engine:
         exitR=exitR)
               
 
-# Gas Props Testing
-#engine.plot_gas_props()
+# Gas Props
+if show_gas_props:
+    engine.plot_gas_props()
 
 ### --- REGEN CIRCUIT INPUTS --- ###
-t_w = 0.75 / 1000 # [mm] --> [m]
-N = 27
+t_w = 1 / 1000 # [mm] --> [m]
+N = 60
 C_w = 1 / 1000 # [mm] --> [m]
-C_h = 3 / 1000 # [mm] --> [m]
-coolantName = "n-Dodecane"
+C_h = 2 / 1000 # [mm] --> [m]
+coolantName = "Ethanol"
 tot_coolant_mdot = engine.fu_mdot # kg/s
-inlet_T_c = 293 # [K]
-inlet_P_c = 420 * 6894.7 # [psia] --> [Pa]
+inlet_T_c = 288 # [K]
+inlet_P_c = 450 * 6894.7 # [psia] --> [Pa]
 # circuit_inlet = -100 # Not used for now
 material = Material("Pure Copper")
 
@@ -149,6 +162,11 @@ if design_regen:
     regen_circuit.solve_circuit(
         inlet_T_c=inlet_T_c,
         inlet_pressure=inlet_P_c,
+        T_wg_bracket=T_wg_bracket,
+        T_wg_residual_tol=T_wg_residual_tol,
+        fixed_sigma=(fixed_bartz_sigma if use_fixed_bartz_sigma else None),
+        T_wg_scan_samples=T_wg_scan_samples,
+        sigma_clamp=sigma_clamp,
     )
 
     if display_regen_outputs:
@@ -165,6 +183,7 @@ if design_regen:
             show_tangential_stresses=show_tangential_stresses,
             show_longitudinal_stresses=show_longitudinal_stresses,
             show_htc=show_htc,
+            show_bartz_sigma=show_bartz_sigma,
         ) # Plot regen circuit values
 
     if export_regen_chans:

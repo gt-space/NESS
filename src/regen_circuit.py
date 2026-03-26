@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Polygon
 from matplotlib.collections import PatchCollection
 
-from scipy.optimize import fsolve 
+from scipy.optimize import fsolve, root_scalar 
 from utils import solve_system, check_defined_vars
 from CoolProp.CoolProp import PropsSI
 from fluid import Fluid
@@ -77,7 +77,8 @@ class RegenCircuit:
         AreaRatio,
         gamma,
         M,
-        T_hg
+        T_hg,
+        T_wg,
 
     ) -> float:
         '''
@@ -95,12 +96,13 @@ class RegenCircuit:
 
         omega = 0.6 # From Bartz Paper
 
-        recovery_factor = math.sqrt(Pr)
-        T_wg = T_hg * (1 + (recovery_factor / 2)*(gamma - 1)*M**2)
+        #recovery_factor = math.sqrt(Pr)
+        #T_wg = T_hg * (1 + (recovery_factor / 2)*(gamma - 1)*M**2)
         # Wall gas should be slightly colder than the freestream gas - got this eqn from PK Week 10 Aero
 
+
         h_gA = 0.026 / (engine.Dt**0.2)
-        h_gB = (Cp * mu**0.2) / (Pr**0.6)
+        h_gB = (Cp * mu**0.2) / (Pr**0.6)   
         h_gC = (Pc / engine.cstar)**0.8
         h_gD = (engine.Dt / engine.r_up_throat)**0.1
         h_gE = (1/AreaRatio)**0.9
@@ -124,7 +126,150 @@ class RegenCircuit:
         print(f"sigma : {sigma}")
         '''
 
-        return h_hg
+        return h_hg, sigma
+
+    def solve_bartz_twg_station(
+        self,
+        i,
+        T_c,
+        h_c,
+        dz,
+        T_wg_bracket,
+        residual_tol=1e-2,
+        fixed_sigma=None,
+        twg_scan_samples=50,
+        sigma_clamp=None,
+    ):
+        """
+        Solve for T_wg such that residual = T_wg_input - T_hw_solved = 0 at one station.
+        """
+        if T_wg_bracket is None or len(T_wg_bracket) != 2:
+            raise ValueError("T_wg_bracket must be a 2-element tuple/list: (T_wg_min, T_wg_max).")
+
+        twg_min = float(T_wg_bracket[0])
+        twg_max = float(T_wg_bracket[1])
+
+        if sigma_clamp is not None:
+            sigma_min = float(sigma_clamp[0])
+            sigma_max = float(sigma_clamp[1])
+            if sigma_min > sigma_max:
+                raise ValueError("sigma_clamp must be (min_sigma, max_sigma).")
+
+        def _resolve_sigma_and_h(
+            T_wg_trial,
+        ):
+            h_hg_model, sigma_model = self.bartz(
+                engine=self.engine,
+                Cp=self.engine.Cp[i],
+                Pr=self.engine.Pr[i],
+                mu=self.engine.mu[i],
+                Pc=self.engine.Pc,
+                AreaRatio=self.engine.AreaRatio[i],
+                gamma=self.engine.gamma[i],
+                M=self.engine.M[i],
+                T_hg=self.engine.T[i],
+                T_wg=float(T_wg_trial),
+            )
+
+            if fixed_sigma is None:
+                sigma_use = sigma_model
+            else:
+                sigma_use = float(fixed_sigma)
+
+            # Optional clamp to constrain solution space.
+            if sigma_clamp is not None:
+                sigma_use = min(max(sigma_use, sigma_min), sigma_max)
+
+            # Bartz predicts h_hg = (other_factors) * sigma.
+            # If sigma_use differs from sigma_model, scale h_hg accordingly.
+            if abs(sigma_model) < 1e-12 and abs(sigma_use - sigma_model) > 0:
+                raise ValueError(
+                    f"Bartz sigma ~0 at station {i} for T_wg_trial={T_wg_trial}; "
+                    "cannot safely scale h_hg."
+                )
+
+            if sigma_use == sigma_model:
+                h_hg_use = h_hg_model
+            else:
+                h_hg_use = h_hg_model * (sigma_use / sigma_model)
+
+            return h_hg_use, sigma_use, sigma_model
+
+        def _station_eval(T_wg_trial):
+            h_hg_use, sigma_use, _ = _resolve_sigma_and_h(T_wg_trial)
+
+            T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out = self.thermal_network(
+                r_eng=self.engine.Contour_r[i] * 0.0254,
+                t_w=self.t_w,
+                c_w=self.C_w,
+                dz=dz,
+                material=self.material,
+                h_hg=h_hg_use,
+                h_c=h_c,
+                T_hg=self.engine.T[i],
+                T_c=T_c,
+            )
+
+            residual = float(T_wg_trial) - float(T_hw_out)
+            return residual, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out
+
+        # --- Scan for sign changes across the bracket ---
+        # brentq needs a sign change, and multiple roots can exist. We locate
+        # sign-change sub-intervals using a residual scan and then solve only
+        # the "most relevant" sub-interval (closest to bracket midpoint).
+        twg_scan_samples = int(twg_scan_samples)
+        if twg_scan_samples < 2:
+            raise ValueError("twg_scan_samples must be >= 2.")
+
+        twg_grid = np.linspace(twg_min, twg_max, twg_scan_samples + 1)
+        f_vals = []
+        for twg_trial in twg_grid:
+            f_vals.append(_station_eval(float(twg_trial))[0])
+
+        # Identify sign-change intervals
+        intervals = []
+        anchor = 0.5 * (twg_min + twg_max)
+        for j in range(len(twg_grid) - 1):
+            f1 = f_vals[j]
+            f2 = f_vals[j + 1]
+            if abs(f1) <= residual_tol:
+                # Already within tolerance at sample point.
+                return float(twg_grid[j]), *_station_eval(float(twg_grid[j]))[1:]
+            if f1 * f2 < 0:
+                a = float(twg_grid[j])
+                b = float(twg_grid[j + 1])
+                mid = 0.5 * (a + b)
+                intervals.append((a, b, mid))
+
+        if not intervals:
+            raise ValueError(
+                f"No sign change found during T_wg scan at station {i} "
+                f"in bracket [{twg_min:.3f}, {twg_max:.3f}]. "
+                "Try expanding/adjusting the bracket or clamp sigma."
+            )
+
+        # Choose the sub-interval closest to bracket midpoint.
+        a_sel, b_sel, _ = min(intervals, key=lambda x: abs(x[2] - anchor))
+
+        sol = root_scalar(
+            lambda t: _station_eval(t)[0],
+            bracket=(a_sel, b_sel),
+            method="brentq",
+            xtol=residual_tol,
+        )
+
+        if not sol.converged:
+            raise ValueError(f"T_wg root solve did not converge at station {i}.")
+
+        station = _station_eval(sol.root)
+        residual = station[0]
+        if abs(residual) > residual_tol:
+            raise ValueError(
+                f"T_wg root residual too high at station {i}: |residual|={abs(residual):.6f} > {residual_tol}."
+            )
+
+        _, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out = station
+        return sol.root, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out
 
     def gnielinski(
         self,
@@ -157,6 +302,7 @@ class RegenCircuit:
         # Dittus-Boelter
         Nu_db = 0.023 * (Re**(0.8)) * (Pr**0.4)
         h_l_db = (Nu_db * fluid.k) / D_h
+        h_l = (Nu_db * fluid.k) / D_h
 
         if debug:
             print(f"Channel Wetted Perimeter : {P} m")
@@ -312,6 +458,11 @@ class RegenCircuit:
         inlet_T_c,
         inlet_pressure,
         circuit_inlet = None, # [m]
+        T_wg_bracket=(300.0, 4500.0), # [K]
+        T_wg_residual_tol=1e-2,
+        fixed_sigma=None,
+        T_wg_scan_samples=200,
+        sigma_clamp=None,
         
     ):
         # Set fluid inlet position by default to bottom of nozzle
@@ -351,6 +502,7 @@ class RegenCircuit:
         self.coolant_vel_arr = np.empty(n_stations)
         self.P_c_arr = np.empty(n_stations)
         self.h_hg_arr = np.empty(n_stations)
+        self.sigma = np.empty(n_stations)
         self.h_c_arr = np.empty(n_stations)
         self.DP_arr = np.empty(n_stations)
         self.Re = np.empty(n_stations)
@@ -363,19 +515,6 @@ class RegenCircuit:
         # T and P Tracker
         P_c = inlet_pressure
         T_c = inlet_T_c
-        
-        for i in range(len(self.engine.T)):
-            h_hg = self.bartz(
-                engine=self.engine,
-                Cp=self.engine.Cp[i],
-                Pr=self.engine.Pr[i],
-                mu=self.engine.mu[i],
-                Pc=self.engine.Pc,
-                AreaRatio=self.engine.AreaRatio[i],
-                gamma=self.engine.gamma[i],
-                M=self.engine.M[i],
-                T_hg=self.engine.T[i]
-            )
         
         # Get Boiling Point
         self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
@@ -396,35 +535,22 @@ class RegenCircuit:
             coolantVolume = self.C_w * self.C_h * ds[i]
             m = coolantVolume * coolant.rho
 
-            h_hg = self.bartz(
-                engine=self.engine,
-                Cp=self.engine.Cp[i],
-                Pr=self.engine.Pr[i],
-                mu=self.engine.mu[i],
-                Pc=self.engine.Pc,
-                AreaRatio=self.engine.AreaRatio[i],
-                gamma=self.engine.gamma[i],
-                M=self.engine.M[i],
-                T_hg=self.engine.T[i]
-            )
-
-            print(f"Bartz HTC : {h_hg} W/m^2-K")
-
             h_c = self.gnielinski(fluid=coolant, debug=True)
             print(f"Coolant HTC : {h_c} W/m^2-K")
 
-
-            T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff = self.thermal_network(
-                r_eng=self.engine.Contour_r[i] * 0.0254,
-                t_w=self.t_w,
-                c_w=self.C_w,
-                dz=ds[i],
-                material=self.material,
-                h_hg=h_hg,
+            T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff = self.solve_bartz_twg_station(
+                i=i,
+                T_c=T_c,
                 h_c=h_c,
-                T_hg=self.engine.T[i],
-                T_c=T_c
-                )
+                dz=ds[i],
+                T_wg_bracket=T_wg_bracket,
+                residual_tol=T_wg_residual_tol,
+                fixed_sigma=fixed_sigma,
+                twg_scan_samples=T_wg_scan_samples,
+                sigma_clamp=sigma_clamp,
+            )
+            print(f"Bartz HTC : {h_hg} W/m^2-K")
+            print(f"T_wg Root : {T_wg_sol} K")
             q_flux = qdot / ds[i] * ((2 * np.pi * self.engine.r_ch) / self.N) # W/m^2
             
             # Stress Calculations
@@ -478,6 +604,7 @@ class RegenCircuit:
             self.coolant_vel_arr[out_idx] = coolant_vel
             self.P_c_arr[out_idx] = P_c_new
             self.h_hg_arr[out_idx] = h_hg
+            self.sigma[out_idx] = sigma
             self.h_c_arr[out_idx] = h_c
             self.DP_arr[out_idx] = DP
             self.Re[out_idx] = Re
@@ -676,174 +803,112 @@ class RegenCircuit:
         show_dimensions = True    
     ):
         '''
-        Plot regen channels.
+        Plot regen channel cross-sections at chamber, throat, and exit
+        in a single window using subplots.
         '''
+        # Unit conversions
+        contour_r_mm = np.asarray(engine.Contour_r) * 25.4
+        contour_z_in = np.asarray(engine.Contour_z)
+        throat_idx = int(np.argmin(contour_r_mm))
 
-        # Unit Conversions
-        engine.r_ch = engine.r_ch * 25.4
+        section_indices = [0, throat_idx, len(contour_r_mm) - 1]
+        section_titles = ["Chamber Plane", "Throat Plane", "Exit Plane"]
 
-        outer_wall_thickness = 5 # [mm]
-        inner_wall_thickness = self.t_w * 1000  # [mm]
+        outer_wall_thickness = 5.0 # [mm]
+        inner_wall_thickness = self.t_w * 1000.0
+        channel_height = self.C_h * 1000.0
+        channel_width = self.C_w * 1000.0
+        wall_width = self.t_w * 1000.0
 
-        inner_radius = engine.r_ch
-        hot_wall_inner_radius = inner_radius - inner_wall_thickness
-        channel_outer_radius = inner_radius + self.C_h * 1000
-        outer_radius = channel_outer_radius + outer_wall_thickness
-        
-        # Calculate angular spacing - distribute evenly around full circle
-        total_angle_per_channel = 2 * np.pi / self.N  # Total angle per channel+rib pair
-        
-        # Calculate angular widths
-        channel_angle = (self.C_w * 1000) / inner_radius  # Angular width of channel
-        wall_angle = (self.t_w * 1000) / inner_radius    # Angular width of rib
-        
-        # Verify geometry fits
-        if (channel_angle + wall_angle) > total_angle_per_channel:
-            print(f"WARNING: Channel + rib width ({channel_angle + wall_angle:.4f} rad) exceeds available space ({total_angle_per_channel:.4f} rad)")
-            print(f"Adjusting channel width to fit...")
-            channel_angle = total_angle_per_channel - wall_angle
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 12))
-        
-        # Draw hot wall annulus (red filled region) - inner wall thickness
-        theta = np.linspace(0, 2*np.pi, 200)
-        
-        # Outer boundary of hot wall (inner radius)
-        x_hot_outer = inner_radius * np.cos(theta)
-        y_hot_outer = inner_radius * np.sin(theta)
-        
-        # Inner boundary of hot wall
-        x_hot_inner = hot_wall_inner_radius * np.cos(theta[::-1])
-        y_hot_inner = hot_wall_inner_radius * np.sin(theta[::-1])
-        
-        # Create hot wall annulus polygon
-        hot_wall_annulus = np.vstack([
-            np.column_stack([x_hot_outer, y_hot_outer]),
-            np.column_stack([x_hot_inner, y_hot_inner])
-        ])
-        
-        hot_wall_poly = Polygon(hot_wall_annulus, facecolor='red', 
-                               edgecolor='darkred', linewidth=2, alpha=0.7, zorder=10)
-        ax.add_patch(hot_wall_poly)
-        
-        # Draw combustion chamber (inside hot wall)
-        ax.fill(x_hot_inner, y_hot_inner, color='lightcoral', alpha=0.3, zorder=9)
-        ax.plot(x_hot_inner, y_hot_inner, 'r--', linewidth=1.5, alpha=0.5, zorder=9)
-        
-        # Draw outer wall (solid shell) - background layer
-        theta_outer = np.linspace(0, 2*np.pi, 200)
-        x_outer = outer_radius * np.cos(theta_outer)
-        y_outer = outer_radius * np.sin(theta_outer)
-        
-        # Fill entire region from channel_outer_radius to outer_radius as solid outer wall
-        outer_annulus_outer = np.column_stack([x_outer, y_outer])
-        x_ch_bound = channel_outer_radius * np.cos(theta_outer[::-1])
-        y_ch_bound = channel_outer_radius * np.sin(theta_outer[::-1])
-        outer_annulus_inner = np.column_stack([x_ch_bound, y_ch_bound])
-        outer_annulus = np.vstack([outer_annulus_outer, outer_annulus_inner])
-        
-        outer_wall_poly = Polygon(outer_annulus, facecolor='darkgray', 
-                                 edgecolor='black', linewidth=2, alpha=0.4, zorder=1)
-        ax.add_patch(outer_wall_poly)
-        
-        # Draw channel outer boundary
-        ax.plot(x_ch_bound, y_ch_bound, 'b--', linewidth=1.5, alpha=0.5, 
-                label='Channel depth', zorder=2)
-        
-        # Draw the annular region between inner_radius and channel_outer_radius
-        # This will be filled with channels and ribs
-        x_annulus_outer = channel_outer_radius * np.cos(theta_outer)
-        y_annulus_outer = channel_outer_radius * np.sin(theta_outer)
-        x_annulus_inner = inner_radius * np.cos(theta_outer[::-1])
-        y_annulus_inner = inner_radius * np.sin(theta_outer[::-1])
-        annulus_full = np.vstack([
-            np.column_stack([x_annulus_outer, y_annulus_outer]),
-            np.column_stack([x_annulus_inner, y_annulus_inner])
-        ])
-        
-        # Fill the annulus with rib material (gray background)
-        annulus_poly = Polygon(annulus_full, facecolor='gray', 
-                              edgecolor='none', alpha=0.6, zorder=2)
-        ax.add_patch(annulus_poly)
-        
-        # Draw channels (cut out from rib material)
-        channels = []
-        
-        current_angle = 0
-        for i in range(self.N):
-            # Channel start and end angles
-            theta_start = current_angle
-            theta_end = current_angle + channel_angle
-            
-            # Create channel polygon (cuts through the rib material)
-            n_points = 20
-            theta_channel = np.linspace(theta_start, theta_end, n_points)
-            
-            # Inner arc
-            x_ch_inner = inner_radius * np.cos(theta_channel)
-            y_ch_inner = inner_radius * np.sin(theta_channel)
-            
-            # Outer arc
-            x_ch_outer = channel_outer_radius * np.cos(theta_channel[::-1])
-            y_ch_outer = channel_outer_radius * np.sin(theta_channel[::-1])
-            
-            # Combine into polygon
-            x_channel = np.concatenate([x_ch_inner, x_ch_outer])
-            y_channel = np.concatenate([y_ch_inner, y_ch_outer])
-            
-            channel_poly = Polygon(np.column_stack([x_channel, y_channel]), 
-                                facecolor='lightblue', edgecolor='blue', 
-                                linewidth=1, alpha=0.8, zorder=5)
-            ax.add_patch(channel_poly)
-            channels.append(channel_poly)
-            
-            # Move to next channel (use total angle per channel to distribute evenly)
-            current_angle = (i + 1) * total_angle_per_channel
-        
-        # Add dimensions if requested
-        if show_dimensions:
-            # Inner radius only
-            ax.plot([0, inner_radius], [0, 0], 'k-', linewidth=0.5, zorder=12)
-            ax.annotate('', xy=(inner_radius, 0), xytext=(0, 0),
-                    arrowprops=dict(arrowstyle='<->', color='black', lw=1.5), zorder=12)
-            ax.text(inner_radius/2, -0.05*outer_radius, f'R_inner = {inner_radius:.2f} mm',
-                ha='center', fontsize=10, bbox=dict(boxstyle='round', facecolor='white'), zorder=12)
-        
-        # Formatting
-        ax.set_aspect('equal')
-        ax.set_xlim(-outer_radius*1.3, outer_radius*1.3)
-        ax.set_ylim(-outer_radius*1.3, outer_radius*1.3)
-        ax.grid(True, alpha=0.3)
-        ax.set_xlabel('X [mm]', fontsize=12)
-        ax.set_ylabel('Y [mm]', fontsize=12)
-        ax.set_title(f'Regenerative Cooling Channel Cross-Section\n{self.N} Channels', 
-                    fontsize=14, fontweight='bold')
-        
-        # Legend
-        from matplotlib.patches import Patch
-        legend_elements = [
-            Patch(facecolor='red', edgecolor='darkred', label='Hot wall', alpha=0.7),
-            Patch(facecolor='lightcoral', edgecolor='r', label='Combustion chamber', alpha=0.3),
-            Patch(facecolor='lightblue', edgecolor='b', label='Coolant channels'),
-            Patch(facecolor='gray', edgecolor='k', label='Structural ribs'),
-            Patch(facecolor='darkgray', edgecolor='k', label='Outer wall', alpha=0.4),
-        ]
-        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
-        
-        # Add text summary (top left)
-        textstr = f'Chamber ID: {engine.r_ch:.2f} mm\n'
-        textstr += f'Hot wall thickness: {inner_wall_thickness:.2f} mm\n'
-        textstr += f'Channel height: {self.C_h * 1000:.2f} mm\n'
-        textstr += f'Channel width: {self.C_w * 1000:.2f} mm\n'
-        textstr += f'Rib thickness: {self.t_w * 1000:.2f} mm\n'
-        textstr += f'Outer wall: {outer_wall_thickness:.2f} mm\n'
-        textstr += f'Number of channels: {self.N}\n'
-        textstr += f'Total OD: {2*outer_radius:.2f} mm'
-        
-        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
+        # Common angular spacing for channels/ribs around circumference
+        total_angle_per_channel = 2 * np.pi / self.N
+
+        fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+
+        for ax, idx, title in zip(axs, section_indices, section_titles):
+            inner_radius = contour_r_mm[idx]
+            hot_wall_inner_radius = inner_radius - inner_wall_thickness
+            channel_outer_radius = inner_radius + channel_height
+            outer_radius = channel_outer_radius + outer_wall_thickness
+
+            # Local channel/rib angular widths at this station
+            channel_angle = channel_width / inner_radius
+            wall_angle = wall_width / inner_radius
+            if (channel_angle + wall_angle) > total_angle_per_channel:
+                channel_angle = total_angle_per_channel - wall_angle
+
+            theta = np.linspace(0, 2*np.pi, 200)
+
+            # Combustion chamber core
+            ax.fill(
+                hot_wall_inner_radius * np.cos(theta),
+                hot_wall_inner_radius * np.sin(theta),
+                color='lightcoral', alpha=0.3
+            )
+
+            # Hot wall annulus
+            hot_wall_annulus = np.vstack([
+                np.column_stack([inner_radius * np.cos(theta), inner_radius * np.sin(theta)]),
+                np.column_stack([hot_wall_inner_radius * np.cos(theta[::-1]), hot_wall_inner_radius * np.sin(theta[::-1])])
+            ])
+            ax.add_patch(Polygon(hot_wall_annulus, facecolor='red', edgecolor='darkred', linewidth=1.5, alpha=0.7))
+
+            # Outer wall annulus
+            outer_annulus = np.vstack([
+                np.column_stack([outer_radius * np.cos(theta), outer_radius * np.sin(theta)]),
+                np.column_stack([channel_outer_radius * np.cos(theta[::-1]), channel_outer_radius * np.sin(theta[::-1])])
+            ])
+            ax.add_patch(Polygon(outer_annulus, facecolor='darkgray', edgecolor='black', linewidth=1.2, alpha=0.4))
+
+            # Rib region annulus background
+            rib_annulus = np.vstack([
+                np.column_stack([channel_outer_radius * np.cos(theta), channel_outer_radius * np.sin(theta)]),
+                np.column_stack([inner_radius * np.cos(theta[::-1]), inner_radius * np.sin(theta[::-1])])
+            ])
+            ax.add_patch(Polygon(rib_annulus, facecolor='gray', edgecolor='none', alpha=0.6))
+
+            # Channels
+            current_angle = 0.0
+            for _ in range(self.N):
+                theta_start = current_angle
+                theta_end = current_angle + channel_angle
+                theta_channel = np.linspace(theta_start, theta_end, 20)
+
+                x_ch_inner = inner_radius * np.cos(theta_channel)
+                y_ch_inner = inner_radius * np.sin(theta_channel)
+                x_ch_outer = channel_outer_radius * np.cos(theta_channel[::-1])
+                y_ch_outer = channel_outer_radius * np.sin(theta_channel[::-1])
+
+                x_channel = np.concatenate([x_ch_inner, x_ch_outer])
+                y_channel = np.concatenate([y_ch_inner, y_ch_outer])
+                ax.add_patch(
+                    Polygon(
+                        np.column_stack([x_channel, y_channel]),
+                        facecolor='lightblue', edgecolor='blue', linewidth=0.8, alpha=0.85
+                    )
+                )
+
+                current_angle += total_angle_per_channel
+
+            if show_dimensions:
+                ax.text(
+                    0.02, 0.98,
+                    f"R_inner = {inner_radius:.2f} mm\nOD = {2*outer_radius:.2f} mm\nZ = {contour_z_in[idx]:.3f} in",
+                    transform=ax.transAxes,
+                    verticalalignment='top',
+                    fontsize=9,
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+                )
+
+            ax.set_title(title, fontsize=12, fontweight='bold')
+            ax.set_xlabel('X [mm]')
+            ax.set_ylabel('Y [mm]')
+            ax.set_aspect('equal')
+            ax.set_xlim(-outer_radius*1.2, outer_radius*1.2)
+            ax.set_ylim(-outer_radius*1.2, outer_radius*1.2)
+            ax.grid(True, alpha=0.3)
+
+        fig.suptitle(f"Regenerative Cooling Channel Cross-Sections ({self.N} Channels)", fontsize=14, fontweight='bold')
         plt.tight_layout()
         plt.show()
 
@@ -1075,6 +1140,7 @@ class RegenCircuit:
         show_tangential_stresses=True,
         show_longitudinal_stresses=True,
         show_htc=True,
+        show_bartz_sigma=True,
     ):
         #### ---- PLOTS ---- ####
         pa_to_ksi = 1.0 / 6894757.293168
@@ -1199,23 +1265,34 @@ class RegenCircuit:
                 axs[2].set_visible(False)
             fig.tight_layout()
 
-        if show_htc:
+        if show_htc or show_bartz_sigma:
             print(f"Hg Length: {len(self.h_hg_arr)}")
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(self.engine.Contour_z, self.h_hg_arr, label='Hot Gas HTC')
-            ax.plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC')
-            ax.set_title("HTCs along Engine")
-            ax.set_xlabel("Axial Position [m]")
-            ax.set_ylabel("HTC [W/m^2-K]")
-            ax.legend()
+            fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+            if show_htc:
+                axs[0].plot(self.engine.Contour_z, self.h_hg_arr, label='Hot Gas HTC')
+                axs[0].plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC')
+                axs[0].set_title("HTCs along Engine")
+                axs[0].set_ylabel("HTC [W/m^2-K]")
+                axs[0].legend()
+            else:
+                axs[0].set_visible(False)
+
+            if show_bartz_sigma:
+                axs[1].plot(self.engine.Contour_z, self.sigma, label='Bartz Sigma')
+                axs[1].set_title("Bartz Sigma along Engine")
+                axs[1].set_xlabel("Axial Position [m]")
+                axs[1].set_ylabel("Sigma [---]")
+                axs[1].legend()
+            else:
+                axs[1].set_visible(False)
             fig.tight_layout()
 
         # Unit conversions and calculations prior to printing
         self.channel_DP = (self.P_c_arr[-1] - self.P_c_arr[0]) / 6894.76 # Pa
         boiling_temp_margin = self.coolant_boiling - max(self.T_c_arr)
-        coolant = Fluid("T", self.T_c_arr[-1], "P", self.T_c_arr[-1], self.coolantName)
+        coolant = Fluid("T", self.T_c_arr[-1], "P", self.P_c_arr[-1], self.coolantName)
         rho1 = coolant.rho
-        coolant = Fluid("T", self.T_c_arr[0], "P", self.T_c_arr[0], self.coolantName)
+        coolant = Fluid("T", self.T_c_arr[0], "P", self.P_c_arr[0], self.coolantName)
         rho2 = coolant.rho
         avg_rho = (rho1 + rho2) / 2
         self.chan_CdA = (self.chan_mdot / (np.sqrt(2 * avg_rho * (self.P_c_arr[-1] - self.P_c_arr[0])))) * 1000000

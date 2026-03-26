@@ -31,7 +31,7 @@ from scipy.interpolate import interp1d
 
 class Engine:
 
-    def __init__(self, thrust, Pc, Pe, MRcore, oxName, fuName, name, CR, Lstar, cstarEff, pcentFFC = 0.0, Pamb = 14.8, numPts = 200, verbose = False,
+    def __init__(self, thrust, Pc, Pe, MRcore, oxName, fuName, name, CR, Lstar, cstarEff, frozen, pcentFFC = 0.0, Pamb = 14.8, numPts = 200, verbose = False,
                  bell = True, chmbR=None, chmbL=None, contAngle=None, throatR=None, throatL=None, expAngle=None, exitR=None):
         self.thrust = thrust
         self.Pc = Pc
@@ -56,7 +56,7 @@ class Engine:
         self.expAngle = expAngle
         self.exitR = exitR
         self.createEngine(verbose=verbose)
-        self.calcGasProperties()
+        self.calcGasProperties(frozen)
 
     def createEngine(self, verbose=False):
         G = Geometry(CR=self.CR, LchamberInp=self.Lprime, RchmConv=2.5, pcentBell=80)
@@ -193,7 +193,7 @@ class Engine:
             self.AreaRatio = np.append(self.AreaRatio, AreaRat)
 
         # --- Chamber Gas Properties Extrapolation --- 
-        Cp_chamb, mu_chamb, k_chamb, Pr_chamb = C.get_Chamber_Transport(self.Pc, self.MRcore)
+        Cp_chamb, mu_chamb, k_chamb, Pr_chamb = C.get_Chamber_Transport(self.Pc, self.MRcore, frozen=frozen)
         MW_chamb, gamma_chamb = C.get_Chamber_MolWt_gamma(self.Pc, self.MRcore)
 
         # Assign Properties
@@ -206,8 +206,11 @@ class Engine:
 
         # --- Converging Section Gas Properties (Linear Correlation) --- 
         # Throat Properties
-        Cp_t, mu_t, k_t, Pr_t = C.get_Throat_Transport(self.Pc, self.MRcore)
-        MW_t, gamma_t = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore)
+        Cp_t, mu_t, k_t, Pr_t = C.get_Throat_Transport(self.Pc, self.MRcore, frozen=frozen)
+        print(f"Cp_t : {Cp_t} J/kg-K")
+        print(f"Pc : {self.Pc} psia")
+        print(f"MR : {self.MRcore}")
+        MW_t, gamma_t = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore, frozen=frozen)
         
         # Property Z-Positions
         z_prop1 = self.Contour_z[self.chamberEnd_ind]
@@ -231,8 +234,8 @@ class Engine:
         self.gamma = np.concatenate((self.gamma, gamma))
 
         # --- Throat ---
-        Cp, mu, k, Pr = C.get_Throat_Transport(self.Pc, self.MRcore)
-        MW, gamma = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore)
+        Cp, mu, k, Pr = C.get_Throat_Transport(self.Pc, self.MRcore, frozen=frozen)
+        MW, gamma = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore, frozen=frozen)
         
         # Assign Properties
         self.Cp = np.append(self.Cp, Cp)
@@ -244,8 +247,8 @@ class Engine:
 
         # --- Diverging Section Gas Properties --- 
         for eps in self.AreaRatio[self.throat_ind + 1 :]:
-            Cp, mu, k, Pr = C.get_Exit_Transport(self.Pc, self.MRcore, eps=eps)
-            MW, gamma = C.get_exit_MolWt_gamma(self.Pc, self.MRcore, eps=eps)
+            Cp, mu, k, Pr = C.get_Exit_Transport(self.Pc, self.MRcore, eps=eps, frozen=frozen)
+            MW, gamma = C.get_exit_MolWt_gamma(self.Pc, self.MRcore, eps=eps, frozen=frozen)
 
             # Assign Properties
             self.Cp = np.append(self.Cp, Cp)
