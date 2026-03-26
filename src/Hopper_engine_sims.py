@@ -20,11 +20,11 @@ design_engine = True                 # Design engine contour and performance cal
 design_regen = True                  # Solve regen circuit and performance analysis
 
 # REGEN OUTPUT PLOT OPTIONS
-display_regen_contour_plot = True   # Output Plot of Regen Channels
-display_regen_outputs = True        # Show plots of regen circuit
-show_regen_temps = True             # Regen Circuit Temps plot
-show_cold_temps = True              # Cold Temps plot
-show_dp = True                      # DP plot
+display_regen_contour_plot = False   # Output Plot of Regen Channels
+display_regen_outputs = False        # Show plots of regen circuit
+show_regen_temps = False             # Regen Circuit Temps plot
+show_cold_temps = False              # Cold Temps plot
+show_dp = True                       # DP plot
 show_pressures = True               # Pressures plot
 show_qdot = True                    # Qdot plot
 show_re = True                      # Re plot
@@ -57,6 +57,7 @@ export_nozzle = False                # Export Nozzle as .txt to CAD
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
 export_bartz_data = False            # Export Bartz HTC to a Excel file
 export_gas_temps = False             # Export Gas Temps to an Excel file
+export_pressures = False             # Export Pressures to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -200,7 +201,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="Y Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
@@ -213,7 +214,7 @@ if show_gas_temp_plot:
 if export_gas_temps:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.T))
-    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="Y Position (in), Gas Temperature (K)", comments="")
+    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
 
 ### --- PLOT OUTPUTS ---
 
@@ -238,7 +239,10 @@ if export_nozzle:
     engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
 
 
-#if export_HTC_hg:
+if export_pressures:
+    import numpy as np
+    data = np.column_stack((engine.Contour_z, engine.P))
+    np.savetxt("Hopper_Pressures_550lbf_ConicalV3.csv", data, delimiter=",", header="X Position (in), Pressure (Psia)", comments="")
 
 # Show Engine Performance Outputs
 if show_engine_perf_outputs:
