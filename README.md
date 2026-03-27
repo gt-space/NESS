@@ -19,16 +19,20 @@ RocketIsp is used for all performance calculations. See those docs here - https:
 ## Structure
 Explain folders briefly
 
-## Installation on Windows 10
-Many external libraries are used that must be downloaded.
+## Installation on Windows 10 / Mac / Linux
+Many external libraries are used that must be downloaded. Please follow the below instructions EXACTLY. You must use a virtual environment to avoid package/python version issues.
+
+1. Open a terminal (either PowerShell or Bash)
+2. Paste "git clone <repo-url> && cd <repo>"
+3. Windows: Paste "setup.bat" | Mac/Linux: "bash setup.sh"
+4. Activate Venv
+    1. Mac/Linux Bash - "source venv/bin/activate"
+    2. Windows Bash - "source venv/Scripts/activate"
 
 ## Verify Installation
-To verify that all packages were installed correctly, run "" in your terminal.
+To verify that all packages were installed correctly, run "python test_config.py" in your terminal.
 
-DO NOT MODIFY any files yet as you might get different results. This file will size a single thrust chamber and design a regenerative cooling circuit for it. The file should take around X minutes to run. 
-
-git clone ...
-pip install -r requirements.txt
+DO NOT MODIFY any files yet as you might get different results. This file will size a single thrust chamber and output a regenerative cooling circuit with thermal/structural/fluids analysis. The file should take around X minutes to run. 
 
 ## Usage
 
