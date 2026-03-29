@@ -208,9 +208,6 @@ class Engine:
         # --- Converging Section Gas Properties (Linear Correlation) --- 
         # Throat Properties
         Cp_t, mu_t, k_t, Pr_t = C.get_Throat_Transport(self.Pc, self.MRcore, frozen=frozen)
-        print(f"Cp_t : {Cp_t} J/kg-K")
-        print(f"Pc : {self.Pc} psia")
-        print(f"MR : {self.MRcore}")
         MW_t, gamma_t = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore, frozen=frozen)
         
         # Property Z-Positions
