@@ -9,6 +9,7 @@ from materials import Material
 from regen_circuit import RegenCircuit
 import numpy as np
 from engine import Engine
+from utils import cea_chamber_tcomb_mr_sweep
 import time
 import matplotlib.pyplot as plt
 
@@ -21,8 +22,8 @@ design_regen = True                  # Solve regen circuit and performance analy
 
 # REGEN OUTPUT PLOT OPTIONS
 display_regen_contour_plot = False   # Output Plot of Regen Channels
-display_regen_outputs = False        # Show plots of regen circuit
-show_regen_temps = False             # Regen Circuit Temps plot
+display_regen_outputs = True        # Show plots of regen circuit
+show_regen_temps = True             # Regen Circuit Temps plot
 show_cold_temps = False              # Cold Temps plot
 show_dp = True                       # DP plot
 show_pressures = True               # Pressures plot
@@ -31,8 +32,8 @@ show_re = True                      # Re plot
 show_coolant_density = True         # Coolant density plot
 show_coolant_velocity = True        # Coolant velocity plot
 show_wall_thermal_gradient = True   # Wall thermal gradient plot
-show_tangential_stresses = True     # Tangential stresses plot
-show_longitudinal_stresses = True   # Longitudinal stresses plot
+show_tangential_stresses = False     # Tangential stresses plot
+show_longitudinal_stresses = False   # Longitudinal stresses plot
 show_htc = True                     # HTC plot
 show_bartz_sigma = True             # Bartz sigma subplot
 
@@ -42,15 +43,19 @@ T_wg_residual_tol = 1e-2            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
 T_wg_scan_samples = 2             # Samples across bracket to detect multiple roots
-sigma_clamp = (0.5, 1.0)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
+sigma_clamp = (0.5, 1.3)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
 
 # ENGINE / PERFORMANCE OUTPUTS
 display_nozzle_mesh = False         # Display mesh of the contour
 show_nozzle_plot = False            # Show engine contour plot
 show_bartz_plot = False             # Show Plot of Bartz HTC
 show_gas_temp_plot = False          # Show Plot of Gas Temperatures along the contour
-show_engine_perf_outputs = False    # Show Engine Performance Outputs
+show_engine_perf_outputs = True    # Show Engine Performance Outputs
 show_gas_props = False              # Generate plots of ALL CEA gas properties along the contour            
+# Chamber Tcomb vs MR: RocketCEA-only sweep via utils (fast). MR_sweep_range None => prompt at run.
+show_chamber_T_vs_MR = False
+MR_sweep_range = (0.5, 4)         # (MR_min, MR_max); set None to prompt for min,max when plot enabled
+num_MR_sweep_points = 25
 
 # FILE EXPORT
 export_nozzle = False                # Export Nozzle as .txt to CAD    
@@ -61,7 +66,7 @@ export_pressures = False             # Export Pressures to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
-fuName = "Ethanol"  # Jet-A
+fuName = "RP-1"  # Jet-A
 oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
@@ -116,7 +121,45 @@ if design_engine:
         throatL=throatL, 
         expAngle=exit_angle, 
         exitR=exitR)
-              
+
+# Chamber combustion temperature vs mixture ratio (RocketCEA Tcomb only; no per-MR Engine)
+if design_engine and show_chamber_T_vs_MR:
+    _mr_range = MR_sweep_range
+    if _mr_range is None:
+        _raw = input("Enter MR sweep min and max (comma-separated, e.g. 1.0,2.5): ").strip()
+        _parts = [float(x.strip()) for x in _raw.split(",")]
+        if len(_parts) != 2:
+            raise ValueError("Expected two values: MR_min, MR_max")
+        _mr_range = (min(_parts), max(_parts))
+    mr_lo, mr_hi = float(_mr_range[0]), float(_mr_range[1])
+    mr_axis, tcomb_axis, tcomb_at_mrcore = cea_chamber_tcomb_mr_sweep(
+        oxName,
+        fuName,
+        Pc,
+        mr_lo,
+        mr_hi,
+        num_MR_sweep_points,
+        mr_highlight=MRcore,
+    )
+    plt.figure()
+    plt.plot(mr_axis, tcomb_axis, color="C0", label="Tcomb (CEA)")
+    plt.scatter(
+        [MRcore],
+        [tcomb_at_mrcore],
+        color="C3",
+        s=80,
+        zorder=5,
+        edgecolors="black",
+        linewidths=0.8,
+        label=f"MRcore = {MRcore}",
+    )
+    plt.xlabel("Mixture ratio O/F")
+    plt.ylabel("Chamber temperature Tcomb (K)")
+    plt.title(f"Tcomb vs MR ({oxName} / {fuName}, Pc = {Pc} psia)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 # Gas Props
 if show_gas_props:
@@ -216,9 +259,12 @@ if export_gas_temps:
     data = np.column_stack((engine.Contour_z, engine.T))
     np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
 
+### --- RUNTIME ----
+end_time = time.time()
+print(f"Runtime: {round(end_time - start_time, 2)} sec")
+
 ### --- PLOT OUTPUTS ---
 
-# Plot Engine Contour
 # Plot Engine Contour
 if show_nozzle_plot:
     if bell:
@@ -247,10 +293,3 @@ if export_pressures:
 # Show Engine Performance Outputs
 if show_engine_perf_outputs:
     print(engine.R.get_summ_str())
-
-### --- OUTPUTS --- ###
-
-#regen_circuit.outputs()
-
-end_time = time.time()
-print(f"Runtime: {round(end_time - start_time, 2)} sec")

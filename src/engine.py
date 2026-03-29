@@ -182,6 +182,7 @@ class Engine:
             thermal_cond_units="W/cm-degC",
             )
         T0 = C.get_Tcomb(self.Pc, self.MRcore)
+        self.Tcomb = float(T0)  # Chamber (combustion) temperature from CEA [K]
         P0 = self.Pc
         rho0 = C.get_Chamber_Density(self.Pc, self.MRcore)
         self.cstar = C.get_Cstar(self.Pc, self.MRcore)

@@ -100,7 +100,6 @@ class RegenCircuit:
         #T_wg = T_hg * (1 + (recovery_factor / 2)*(gamma - 1)*M**2)
         # Wall gas should be slightly colder than the freestream gas - got this eqn from PK Week 10 Aero
 
-
         h_gA = 0.026 / (engine.Dt**0.2)
         h_gB = (Cp * mu**0.2) / (Pr**0.6)   
         h_gC = (Pc / engine.cstar)**0.8
@@ -112,6 +111,9 @@ class RegenCircuit:
         sigma = 1 / (sigma_A * sigma_B)
 
         h_hg = h_gA * h_gB * h_gC * h_gD * h_gE * sigma
+
+        print(f"Dt: {engine.Dt} m")
+        print(f"Cp : {engine.Cp} J/kgK")
 
         # Bartz Debug
         '''
@@ -302,7 +304,7 @@ class RegenCircuit:
         # Dittus-Boelter
         Nu_db = 0.023 * (Re**(0.8)) * (Pr**0.4)
         h_l_db = (Nu_db * fluid.k) / D_h
-        h_l = (Nu_db * fluid.k) / D_h
+        #h_l = (Nu_db * fluid.k) / D_h
 
         if debug:
             print(f"Channel Wetted Perimeter : {P} m")
