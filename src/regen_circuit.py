@@ -112,9 +112,6 @@ class RegenCircuit:
 
         h_hg = h_gA * h_gB * h_gC * h_gD * h_gE * sigma
 
-        print(f"Dt: {engine.Dt} m")
-        print(f"Cp : {engine.Cp} J/kgK")
-
         # Bartz Debug
         '''
         print(f"T_wg : {T_wg}")
@@ -139,7 +136,6 @@ class RegenCircuit:
         T_wg_bracket,
         residual_tol=1e-2,
         fixed_sigma=None,
-        twg_scan_samples=50,
         sigma_clamp=None,
     ):
         """
@@ -215,15 +211,8 @@ class RegenCircuit:
             residual = float(T_wg_trial) - float(T_hw_out)
             return residual, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out
 
-        # --- Scan for sign changes across the bracket ---
-        # brentq needs a sign change, and multiple roots can exist. We locate
-        # sign-change sub-intervals using a residual scan and then solve only
-        # the "most relevant" sub-interval (closest to bracket midpoint).
-        twg_scan_samples = int(twg_scan_samples)
-        if twg_scan_samples < 2:
-            raise ValueError("twg_scan_samples must be >= 2.")
-
-        twg_grid = np.linspace(twg_min, twg_max, twg_scan_samples + 1)
+        # --- Bracket endpoints only, then brentq on the sub-interval with a sign change ---
+        twg_grid = np.linspace(twg_min, twg_max, 2)
         f_vals = []
         for twg_trial in twg_grid:
             f_vals.append(_station_eval(float(twg_trial))[0])
@@ -463,9 +452,8 @@ class RegenCircuit:
         T_wg_bracket=(300.0, 4500.0), # [K]
         T_wg_residual_tol=1e-2,
         fixed_sigma=None,
-        T_wg_scan_samples=200,
         sigma_clamp=None,
-        
+        print_station_rows=False,
     ):
         # Set fluid inlet position by default to bottom of nozzle
         if circuit_inlet is None:
@@ -520,25 +508,17 @@ class RegenCircuit:
         
         # Get Boiling Point
         self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
-        print(f" Coolant BP : {self.coolant_boiling} K")
-        
-        # Regen Circuit Loop
-        for i in tqdm(range(circuit_inlet, circuit_outlet - 1, -1)):
-            # calculate coolant fluid properties from (inlet pressure and T_c)
-            # calculate coolant volume from channel geometry (C_w * C_h * dz)
-            # solve thermal network with inputted T_c and T_hg --> outputs T_hw, T_cw, and Qdot
-            # calculate Q from Qdot and timestep and use Q = mCpdT to calculate new T_c
-            # Use coolant velocity to calculate new z using timestep
-            print(f"T_c : {T_c} K")
-            print(f"P_c : {P_c / 6894.7} psia")
-            print(f"Ind : {i}")
+        print(f" Coolant BP : {round(self.coolant_boiling, 2)} K")
+
+        station_range = range(circuit_inlet, circuit_outlet - 1, -1)
+        for i in tqdm(station_range):
+            T_c_in = T_c
             coolant = Fluid("T", T_c, "P", P_c, self.coolantName)
 
             coolantVolume = self.C_w * self.C_h * ds[i]
             m = coolantVolume * coolant.rho
 
-            h_c = self.gnielinski(fluid=coolant, debug=True)
-            print(f"Coolant HTC : {h_c} W/m^2-K")
+            h_c = self.gnielinski(fluid=coolant, debug=False)
 
             T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff = self.solve_bartz_twg_station(
                 i=i,
@@ -548,11 +528,8 @@ class RegenCircuit:
                 T_wg_bracket=T_wg_bracket,
                 residual_tol=T_wg_residual_tol,
                 fixed_sigma=fixed_sigma,
-                twg_scan_samples=T_wg_scan_samples,
                 sigma_clamp=sigma_clamp,
             )
-            print(f"Bartz HTC : {h_hg} W/m^2-K")
-            print(f"T_wg Root : {T_wg_sol} K")
             q_flux = qdot / ds[i] * ((2 * np.pi * self.engine.r_ch) / self.N) # W/m^2
             
             # Stress Calculations
@@ -585,18 +562,10 @@ class RegenCircuit:
             T_c_new = ((qdot * dt) / (m * coolant.Cp)) + T_c
             T_c = T_c_new
 
-            # Debug Print
-            #print(f"T_c : {T_c} K")
-            #print(f"P_c : {P_c} psia")
-            print(f"Coolant Velocity : {coolant_vel} m/s")
-            print(f"Re : {Re}")
-            print(f"DP : {DP / 6894.7} psid")
-
             # Boiling Check
             if T_c > self.coolant_boiling:
                 raise ValueError(f" === Coolant boiled at {round(self.coolant_boiling, 2)} K!")
-                break
-            
+
             # Indexed update (faster than repeated np.append in loop).
             out_idx = i - circuit_outlet
             self.T_hw_arr[out_idx] = T_hw
@@ -616,8 +585,25 @@ class RegenCircuit:
             self.sigma_pl[out_idx] = sigma_pl
             self.sigma_l[out_idx] = sigma_l
 
-            #break
-    
+            if print_station_rows:
+                z_in = float(self.engine.Contour_z[i])
+                print(f"index : {i}  z : {z_in:.4f} in")
+                print(f"T_c in : {T_c_in:.2f} K")
+                print(f"T_c out : {T_c_new:.2f} K")
+                print(f"P_c : {P_c_new / 6894.76:.2f} psia")
+                print(f"T_hg : {T_hg:.2f} K")
+                print(f"T_hw : {T_hw:.2f} K")
+                print(f"T_cw : {T_cw:.2f} K")
+                print(f"T_wg : {T_wg_sol:.2f} K")
+                print(f"h_hg : {h_hg:.0f} W/m^2-K")
+                print(f"h_c : {h_c:.0f} W/m^2-K")
+                print(f"qdot : {qdot:.4g} W")
+                print(f"coolant_vel : {coolant_vel:.3f} m/s")
+                print(f"Re : {Re:.1f}")
+                print(f"dp : {DP / 6894.76:.3f} psid")
+                print(f"sigma : {sigma:.4f}")
+                print()
+
     def calculate_boiling_point(
         self,
         P_c,
@@ -710,13 +696,13 @@ class RegenCircuit:
     ):
         
         f_D = self.calc_friction_factor(D_h, Re, eps)
-        print(f"Friction Factor : {f_D}")
-        print(f"D_h : {D_h} m")
-        print(f"Rho : {fluid.rho} kg/m^3")
+        #print(f"Friction Factor : {f_D}")
+        #print(f"D_h : {D_h} m")
+        #print(f"Rho : {fluid.rho} kg/m^3")
         dP = 0.5 * fluid.rho * velocity**2 * (L / D_h) * f_D # Pa
 
         #print(f"f_d : {f_D}")
-        print(f"Length : {L} m")
+        #print(f"Length : {L} m")
 
         return dP
 

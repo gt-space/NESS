@@ -42,8 +42,8 @@ T_wg_bracket = (500.0, 2500.0)      # [K] global bracket for root solve
 T_wg_residual_tol = 1e-2            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
-T_wg_scan_samples = 2             # Samples across bracket to detect multiple roots
 sigma_clamp = (0.5, 1.3)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
+print_regen_station_rows = False   # If True, print per-station lines like "T_hw : … K" (tqdm still runs)
 
 # ENGINE / PERFORMANCE OUTPUTS
 display_nozzle_mesh = False         # Display mesh of the contour
@@ -75,7 +75,7 @@ MRcore = 1.8
 CR = 5
 Lstar = 30 # in
 cstarEff = 0.85
-numPts = 100
+numPts = 70
 bell = True
 frozen = True
 
@@ -209,8 +209,8 @@ if design_regen:
         T_wg_bracket=T_wg_bracket,
         T_wg_residual_tol=T_wg_residual_tol,
         fixed_sigma=(fixed_bartz_sigma if use_fixed_bartz_sigma else None),
-        T_wg_scan_samples=T_wg_scan_samples,
         sigma_clamp=sigma_clamp,
+        print_station_rows=print_regen_station_rows,
     )
 
     if display_regen_outputs:
