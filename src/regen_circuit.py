@@ -262,52 +262,65 @@ class RegenCircuit:
         _, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out = station
         return sol.root, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out
 
-    def gnielinski(
+    def coolant_htc(
         self,
         fluid,
-        eps = None,
-        debug = False
+        correlation="Gnielinski",
+        eps=None,
+        debug=False,
+    ):
+        """
+        Calculate coolant-side HTC using selected correlation.
 
-    ) -> float:
-        '''
-        Calculate the Coolant Heat Transfer Coefficient using Gnielinski's correlation.
-        
-        '''
-        
-        P = 2 * (self.C_w + self.C_h) # Channel Wetted Perimeter
-        A_c = self.C_w * self.C_h # Channel Flow Area
-        D_h = (4 * A_c) / P # Channel Hydraulic Diameter
-        Re = (self.chan_mdot * D_h) / (A_c * fluid.mu) # Channel Reynold's Number
-        Pr = fluid.Pr # Prandlt Number
+        Parameters
+        ----------
+        correlation : str
+            "Gnielinski" or "Dittus-Boelter"
+        """
+        P = 2 * (self.C_w + self.C_h)  # Channel wetted perimeter
+        A_c = self.C_w * self.C_h       # Channel flow area
+        D_h = (4 * A_c) / P             # Hydraulic diameter
+        Re = (self.chan_mdot * D_h) / (A_c * fluid.mu)
+        Pr = fluid.Pr
 
         f_d = self.calc_friction_factor(
             D_h=D_h,
             Re=Re,
-            eps=eps
+            eps=eps,
         )
 
-        # Gnielinksi
-        Nu = ((f_d / 8) * (Re - 1000) * Pr) / (1 + 12.7 * ((f_d/8)**(1/2)) * (Pr**(2/3) - 1)) # Nusselt Number
-        h_l = (Nu * fluid.k) / (D_h)  # Coolant HTC
+        # Gnielinski
+        Nu_gn = ((f_d / 8) * (Re - 1000) * Pr) / (1 + 12.7 * ((f_d / 8) ** 0.5) * (Pr ** (2 / 3) - 1))
+        h_gn = (Nu_gn * fluid.k) / D_h
 
         # Dittus-Boelter
-        Nu_db = 0.023 * (Re**(0.8)) * (Pr**0.4)
-        h_l_db = (Nu_db * fluid.k) / D_h
-        #h_l = (Nu_db * fluid.k) / D_h
+        Nu_db = 0.023 * (Re ** 0.8) * (Pr ** 0.4)
+        h_db = (Nu_db * fluid.k) / D_h
+
+        corr_key = str(correlation).strip().lower()
+        if corr_key in ("gnielinski", "gn"):
+            h_sel = h_gn
+        elif corr_key in ("dittus-boelter", "dittus_boelter", "db"):
+            h_sel = h_db
+        else:
+            raise ValueError(
+                f"Unknown coolant HTC correlation '{correlation}'. "
+                "Use 'Gnielinski' or 'Dittus-Boelter'."
+            )
 
         if debug:
-            print(f"Channel Wetted Perimeter : {P} m")
-            print(f"Flow Area : {A_c} m^2")
+            print(f"Coolant HTC correlation : {correlation}")
             print(f"Hydraulic Diameter : {D_h} m")
             print(f"Re : {Re}")
             print(f"Pr : {Pr}")
             print(f"f_d : {f_d}")
-            print(f"Nu : {Nu}")
-            print(f"Gnielinksi HTC : {h_l} W/m^2-K")
-            print(f"DB HTC : {h_l_db} W/m^2-K")
-            print(f"Nusselt DB : {Nu_db}")
+            print(f"Nu_Gnielinski : {Nu_gn}")
+            print(f"Nu_DittusBoelter : {Nu_db}")
+            print(f"h_c_Gnielinski : {h_gn} W/m^2-K")
+            print(f"h_c_DittusBoelter : {h_db} W/m^2-K")
+            print(f"h_c_Selected : {h_sel} W/m^2-K")
 
-        return h_l
+        return h_sel, h_gn, h_db
     
     def calculate_stress(
         self,
@@ -453,6 +466,7 @@ class RegenCircuit:
         T_wg_residual_tol=1e-2,
         fixed_sigma=None,
         sigma_clamp=None,
+        coolant_htc_correlation="Gnielinski",
         print_station_rows=False,
     ):
         # Set fluid inlet position by default to bottom of nozzle
@@ -494,6 +508,8 @@ class RegenCircuit:
         self.h_hg_arr = np.empty(n_stations)
         self.sigma = np.empty(n_stations)
         self.h_c_arr = np.empty(n_stations)
+        self.h_c_gn_arr = np.empty(n_stations)
+        self.h_c_db_arr = np.empty(n_stations)
         self.DP_arr = np.empty(n_stations)
         self.Re = np.empty(n_stations)
         self.sigma_pt = np.empty(n_stations)
@@ -518,7 +534,11 @@ class RegenCircuit:
             coolantVolume = self.C_w * self.C_h * ds[i]
             m = coolantVolume * coolant.rho
 
-            h_c = self.gnielinski(fluid=coolant, debug=False)
+            h_c, h_c_gn, h_c_db = self.coolant_htc(
+                fluid=coolant,
+                correlation=coolant_htc_correlation,
+                debug=False,
+            )
 
             T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff = self.solve_bartz_twg_station(
                 i=i,
@@ -577,6 +597,8 @@ class RegenCircuit:
             self.h_hg_arr[out_idx] = h_hg
             self.sigma[out_idx] = sigma
             self.h_c_arr[out_idx] = h_c
+            self.h_c_gn_arr[out_idx] = h_c_gn
+            self.h_c_db_arr[out_idx] = h_c_db
             self.DP_arr[out_idx] = DP
             self.Re[out_idx] = Re
             self.sigma_pt[out_idx] = sigma_pt
@@ -597,6 +619,8 @@ class RegenCircuit:
                 print(f"T_wg : {T_wg_sol:.2f} K")
                 print(f"h_hg : {h_hg:.0f} W/m^2-K")
                 print(f"h_c : {h_c:.0f} W/m^2-K")
+                print(f"h_c_Gnielinski : {h_c_gn:.0f} W/m^2-K")
+                print(f"h_c_DittusBoelter : {h_c_db:.0f} W/m^2-K")
                 print(f"qdot : {qdot:.4g} W")
                 print(f"coolant_vel : {coolant_vel:.3f} m/s")
                 print(f"Re : {Re:.1f}")
@@ -733,6 +757,7 @@ class RegenCircuit:
         
         if eps is None:
             eps = 0.015 / 1000 # [mm] UPDATE - ALSO UPDATE FOR LPBF SURFACES
+
 
         f = fsolve(colebrook_white, f_guess, args=(eps, D_h, Re))[0]
 
@@ -1128,6 +1153,7 @@ class RegenCircuit:
         show_tangential_stresses=True,
         show_longitudinal_stresses=True,
         show_htc=True,
+        show_coolant_htc_both=False,
         show_bartz_sigma=True,
     ):
         #### ---- PLOTS ---- ####
@@ -1258,7 +1284,10 @@ class RegenCircuit:
             fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
             if show_htc:
                 axs[0].plot(self.engine.Contour_z, self.h_hg_arr, label='Hot Gas HTC')
-                axs[0].plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC')
+                axs[0].plot(self.engine.Contour_z, self.h_c_arr, label='Coolant HTC (Selected)')
+                if show_coolant_htc_both:
+                    axs[0].plot(self.engine.Contour_z, self.h_c_gn_arr, '--', label='Coolant HTC (Gnielinski)')
+                    axs[0].plot(self.engine.Contour_z, self.h_c_db_arr, '--', label='Coolant HTC (Dittus-Boelter)')
                 axs[0].set_title("HTCs along Engine")
                 axs[0].set_ylabel("HTC [W/m^2-K]")
                 axs[0].legend()

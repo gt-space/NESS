@@ -35,6 +35,7 @@ show_wall_thermal_gradient = True   # Wall thermal gradient plot
 show_tangential_stresses = False     # Tangential stresses plot
 show_longitudinal_stresses = False   # Longitudinal stresses plot
 show_htc = True                     # HTC plot
+show_coolant_htc_both = True       # If True, overlay Gnielinski and Dittus-Boelter coolant HTCs
 show_bartz_sigma = True             # Bartz sigma subplot
 
 # BARTZ T_wg ROOT SOLVER OPTIONS
@@ -43,6 +44,7 @@ T_wg_residual_tol = 1e-2            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
 sigma_clamp = (0.5, 1.3)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
+coolant_htc_correlation = "Dittus-Boelter"    # "Gnielinski" or "Dittus-Boelter"
 print_regen_station_rows = False   # If True, print per-station lines like "T_hw : … K" (tqdm still runs)
 
 # ENGINE / PERFORMANCE OUTPUTS
@@ -210,6 +212,7 @@ if design_regen:
         T_wg_residual_tol=T_wg_residual_tol,
         fixed_sigma=(fixed_bartz_sigma if use_fixed_bartz_sigma else None),
         sigma_clamp=sigma_clamp,
+        coolant_htc_correlation=coolant_htc_correlation,
         print_station_rows=print_regen_station_rows,
     )
 
@@ -227,6 +230,7 @@ if design_regen:
             show_tangential_stresses=show_tangential_stresses,
             show_longitudinal_stresses=show_longitudinal_stresses,
             show_htc=show_htc,
+            show_coolant_htc_both=show_coolant_htc_both,
             show_bartz_sigma=show_bartz_sigma,
         ) # Plot regen circuit values
 
