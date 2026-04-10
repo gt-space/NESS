@@ -33,15 +33,16 @@ show_pr = True                     # Pr plot
 show_coolant_density = True         # Coolant density plot
 show_coolant_velocity = True        # Coolant velocity plot
 show_wall_thermal_gradient = True   # Wall thermal gradient plot
-show_tangential_stresses = False     # Tangential stresses plot
-show_longitudinal_stresses = False   # Longitudinal stresses plot
+show_tangential_stresses = True     # Tangential stresses plot
+show_longitudinal_stresses = True   # Longitudinal stresses plot
 show_htc = True                     # HTC plot
 show_coolant_htc_both = True       # If True, overlay Gnielinski and Dittus-Boelter coolant HTCs
 show_bartz_sigma = True             # Bartz sigma subplot
+show_heat_flux = True               # Heat flux (MW/m^2) plot
 
 # BARTZ T_wg ROOT SOLVER OPTIONS
 T_wg_bracket = (300.0, 2500.0)      # [K] global bracket for root solve
-T_wg_residual_tol = 1e-2            # [K] residual tolerance for T_wg - T_hw
+T_wg_residual_tol = 1e-1            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
 sigma_clamp = (0.5, 1.5)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
@@ -69,7 +70,7 @@ export_pressures = False             # Export Pressures to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
-fuName = "RP-1"  # Jet-A
+fuName = "JetA"  # Jet-A
 oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
@@ -171,15 +172,17 @@ if show_gas_props:
     engine.plot_gas_props()
 
 ### --- REGEN CIRCUIT INPUTS --- ###
-t_w = 1 / 1000 # [mm] --> [m]
-N = 60
+t_w = 0.7 / 1000 # [mm] --> [m]
+N = 50
 C_w = 1 / 1000 # [mm] --> [m]
-C_h = 1 / 1000 # [mm] --> [m]
-coolantName = "Ethanol"
+C_h = 2 / 1000 # [mm] --> [m]
+coolantName = "n-Decane"
 tot_coolant_mdot = engine.fu_mdot # kg/s
 inlet_T_c = 288 # [K]
 inlet_P_c = 450 * 6894.7 # [psia] --> [Pa]
-coolant_temp_limit = None # [K]; set a float to override fluid saturation/pseudocritical limit
+coolant_temp_limit = 540 # [K]; set a float to override fluid saturation/pseudocritical limit, set as JetA
+tbc_thickness = 0.045 / 1000  # [mm] → [m]; set 0 for no coating
+tbc_k = 1.0                 # [W/m-K] thermal conductivity of TBC (only used when tbc_thickness > 0)
 # circuit_inlet = -100 # Not used for now
 material = Material("AlSi10Mg")
 
@@ -201,8 +204,10 @@ if design_regen:
         coolantName=coolantName,
         C_h=C_h,
         engine=engine,
-        N =N,
+        N=N,
         C_w=C_w,
+        tbc_thickness=tbc_thickness,
+        tbc_k=tbc_k,
     )
 
     if display_regen_contour_plot:
@@ -238,6 +243,7 @@ if design_regen:
             show_htc=show_htc,
             show_coolant_htc_both=show_coolant_htc_both,
             show_bartz_sigma=show_bartz_sigma,
+            show_heat_flux=show_heat_flux,
         ) # Plot regen circuit values
 
     if export_regen_chans:

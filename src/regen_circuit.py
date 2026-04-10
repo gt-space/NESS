@@ -34,6 +34,8 @@ class RegenCircuit:
         N = None,
         f_w = None,
         C_w = None,
+        tbc_thickness = 0.0,
+        tbc_k = None,
     ):
         self.t_w = t_w
         self.material = material
@@ -46,6 +48,8 @@ class RegenCircuit:
         self.C_h = C_h
         self.ch_AR = self.C_h / self.C_w
         self.engine = engine # Engine object from engine.py
+        self.tbc_thickness = float(tbc_thickness)
+        self.tbc_k = float(tbc_k) if tbc_k is not None else None
 
         # Check that the inputted regen geometry is compatible with the Contour.
         self.regen_geometry(
@@ -139,7 +143,8 @@ class RegenCircuit:
         sigma_clamp=None,
     ):
         """
-        Solve for T_wg such that residual = T_wg_input - T_hw_solved = 0 at one station.
+        Solve for T_wg such that residual = T_wg_input - T_tbc_surface = 0 at one station.
+        When tbc_thickness == 0, T_tbc_surface == T_hw so this reduces to the original formulation.
         """
         if T_wg_bracket is None or len(T_wg_bracket) != 2:
             raise ValueError("T_wg_bracket must be a 2-element tuple/list: (T_wg_min, T_wg_max).")
@@ -196,7 +201,7 @@ class RegenCircuit:
         def _station_eval(T_wg_trial):
             h_hg_use, sigma_use, _ = _resolve_sigma_and_h(T_wg_trial)
 
-            T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out = self.thermal_network(
+            T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out = self.thermal_network(
                 r_eng=self.engine.Contour_r[i] * 0.0254,
                 t_w=self.t_w,
                 c_w=self.C_w,
@@ -208,8 +213,10 @@ class RegenCircuit:
                 T_c=T_c,
             )
 
-            residual = float(T_wg_trial) - float(T_hw_out)
-            return residual, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out
+            # Residual: T_wg trial must equal the TBC outer surface temperature.
+            # When tbc_thickness == 0, T_tbc_out == T_hw_out.
+            residual = float(T_wg_trial) - float(T_tbc_out)
+            return residual, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out
 
         # --- Bracket endpoints only, then brentq on the sub-interval with a sign change ---
         twg_grid = np.linspace(twg_min, twg_max, 2)
@@ -259,8 +266,8 @@ class RegenCircuit:
                 f"T_wg root residual too high at station {i}: |residual|={abs(residual):.6f} > {residual_tol}."
             )
 
-        _, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out = station
-        return sol.root, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out
+        _, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out = station
+        return sol.root, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out
 
     def coolant_htc(
         self,
@@ -419,9 +426,27 @@ class RegenCircuit:
 
         # Thermal Resistances
         R_hghw = 1 / (h_hg * A_hwall_ch)
+        R_tbc = 0.0
+        if self.tbc_thickness > 0.0 and self.tbc_k is not None:
+            R_tbc = self.tbc_thickness / (self.tbc_k * A_hwall_ch)
         R_wall = t_w / (material.k * A_hwall_ch)
         R_cwc = 1 / (h_c * A_ch_eff)
-        R_tot = R_hghw + R_wall + R_cwc
+        R_tot = R_hghw + R_tbc + R_wall + R_cwc
+
+        # Fast path: only T_hg and T_c specified (regen station solve). Series network is linear;
+        # SymPy is O(100–1000×) slower per call than closed form.
+        if (
+            qdot_new is None
+            and T_hw_new is None
+            and T_cw_new is None
+            and T_hg_new is not None
+            and T_c_new is not None
+        ):
+            qdot_val = (T_hg_new - T_c_new) / R_tot
+            T_tbc_val = T_hg_new - qdot_val * R_hghw           # TBC outer surface (gas-side)
+            T_hw_val = T_tbc_val - qdot_val * R_tbc             # metal hot wall under coating
+            T_cw_val = T_hw_val - qdot_val * R_wall
+            return T_hg_new, T_c_new, T_cw_val, T_hw_val, qdot_val, A_ch_eff, T_tbc_val
 
         '''
         # Debug Prints
@@ -439,7 +464,7 @@ class RegenCircuit:
         '''
         
         #eq1 = sp.Eq(qdot, (T_hg - T_c) / R_tot)
-        eq2 = sp.Eq(qdot, (T_hg - T_hw) / R_hghw)
+        eq2 = sp.Eq(qdot, (T_hg - T_hw) / (R_hghw + R_tbc))
         eq3 = sp.Eq(qdot, (T_hw - T_cw) / R_wall)
         eq4 = sp.Eq(qdot, (T_cw - T_c) / R_cwc)
 
@@ -455,7 +480,9 @@ class RegenCircuit:
         T_hw = output[T_hw]
         qdot = output[qdot]
 
-        return T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff
+        T_tbc_val = float(T_hg) - float(qdot) * R_hghw
+
+        return T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff, T_tbc_val
     
     def solve_circuit(
         self,
@@ -468,6 +495,7 @@ class RegenCircuit:
         sigma_clamp=None,
         coolant_htc_correlation="Gnielinski",
         coolant_temp_limit=None,
+        show_progress=True,
         print_station_rows=False,
     ):
         # Set fluid inlet position by default to bottom of nozzle
@@ -493,6 +521,7 @@ class RegenCircuit:
         # repeat end value so arrays have same shapes
         ds_end = ds[-1]
         ds = np.append(ds, ds_end)
+        self.regen_curve_length_m = float(np.sum(ds[circuit_outlet:circuit_inlet + 1]))
 
         #print(dr)
         #print(dz)
@@ -512,6 +541,7 @@ class RegenCircuit:
         self.h_c_gn_arr = np.empty(n_stations)
         self.h_c_db_arr = np.empty(n_stations)
         self.DP_arr = np.empty(n_stations)
+        self.f_D_arr = np.empty(n_stations)
         self.Re = np.empty(n_stations)
         self.Pr_arr = np.empty(n_stations)
         self.sigma_pt = np.empty(n_stations)
@@ -520,6 +550,8 @@ class RegenCircuit:
         self.sigma_pl = np.empty(n_stations)
         self.sigma_l = np.empty(n_stations)
         self.coolant_boiling_arr = np.empty(n_stations)
+        self.T_tbc_arr = np.empty(n_stations)
+        self.q_flux_arr = np.empty(n_stations)
 
         # T and P Tracker
         P_c = inlet_pressure
@@ -534,7 +566,7 @@ class RegenCircuit:
             print(f" Coolant temperature limit (user): {round(self.coolant_boiling_inlet, 2)} K")
 
         station_range = range(circuit_inlet, circuit_outlet - 1, -1)
-        for i in tqdm(station_range):
+        for i in tqdm(station_range, disable=(not show_progress)):
             T_c_in = T_c
             coolant = Fluid("T", T_c, "P", P_c, self.coolantName)
 
@@ -547,7 +579,7 @@ class RegenCircuit:
                 debug=False,
             )
 
-            T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff = self.solve_bartz_twg_station(
+            T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff, T_tbc = self.solve_bartz_twg_station(
                 i=i,
                 T_c=T_c,
                 h_c=h_c,
@@ -581,8 +613,17 @@ class RegenCircuit:
             coolant_vel = self.chan_mdot / (coolant.rho * self.C_w * self.C_h)
             D_h = (4*(self.C_w * self.C_h)) / (2*(self.C_w + self.C_h))
             Re = (coolant.rho * coolant_vel * D_h) / coolant.mu
-            DP = self.calc_DP(coolant, coolant_vel, ds[i], D_h, Re)
+            f_D = self.calc_friction_factor(D_h, Re)
+            DP = self.calc_DP(coolant, coolant_vel, ds[i], D_h, Re, f_D=f_D)
             P_c_new = P_c - DP
+            if P_c_new <= 0.0:
+                raise ValueError(
+                    "Coolant pressure became non-physical (<= 0 Pa) during pressure-drop integration. "
+                    f"station={i}, P_old={P_c/6894.76:.2f} psia, dP={DP/6894.76:.2f} psid, "
+                    f"P_new={P_c_new/6894.76:.2f} psia, Re={Re:.0f}, f_D={f_D:.4f}, "
+                    f"vel={coolant_vel:.2f} m/s, Dh={D_h*1000:.3f} mm, L={ds[i]*1000:.3f} mm. "
+                    "Reduce per-channel mass flow (increase N) or increase channel area (C_w/C_h)."
+                )
             P_c = P_c_new
 
             dt = ds[i] / coolant_vel
@@ -614,6 +655,7 @@ class RegenCircuit:
             self.h_c_gn_arr[out_idx] = h_c_gn
             self.h_c_db_arr[out_idx] = h_c_db
             self.DP_arr[out_idx] = DP
+            self.f_D_arr[out_idx] = f_D
             self.Re[out_idx] = Re
             self.Pr_arr[out_idx] = coolant.Pr
             self.sigma_pt[out_idx] = sigma_pt
@@ -622,6 +664,8 @@ class RegenCircuit:
             self.sigma_pl[out_idx] = sigma_pl
             self.sigma_l[out_idx] = sigma_l
             self.coolant_boiling_arr[out_idx] = coolant_boiling_local
+            self.T_tbc_arr[out_idx] = T_tbc
+            self.q_flux_arr[out_idx] = q_flux
 
             if print_station_rows:
                 z_in = float(self.engine.Contour_z[i])
@@ -630,6 +674,7 @@ class RegenCircuit:
                 print(f"T_c out : {T_c_new:.2f} K")
                 print(f"P_c : {P_c_new / 6894.76:.2f} psia")
                 print(f"T_hg : {T_hg:.2f} K")
+                print(f"T_tbc : {T_tbc:.2f} K")
                 print(f"T_hw : {T_hw:.2f} K")
                 print(f"T_cw : {T_cw:.2f} K")
                 print(f"T_wg : {T_wg_sol:.2f} K")
@@ -640,6 +685,7 @@ class RegenCircuit:
                 print(f"qdot : {qdot:.4g} W")
                 print(f"coolant_vel : {coolant_vel:.3f} m/s")
                 print(f"Re : {Re:.1f}")
+                print(f"f_D : {f_D:.4f}")
                 print(f"Pr : {coolant.Pr:.3f}")
                 print(f"dp : {DP / 6894.76:.3f} psid")
                 print(f"sigma : {sigma:.4f}")
@@ -736,10 +782,11 @@ class RegenCircuit:
         L,
         D_h,
         Re,
-        eps = None
+        eps = None,
+        f_D = None,
     ):
-        
-        f_D = self.calc_friction_factor(D_h, Re, eps)
+        if f_D is None:
+            f_D = self.calc_friction_factor(D_h, Re, eps)
         #print(f"Friction Factor : {f_D}")
         #print(f"D_h : {D_h} m")
         #print(f"Rho : {fluid.rho} kg/m^3")
@@ -769,19 +816,23 @@ class RegenCircuit:
 
         '''
 
-        def colebrook_white(f, eps, D_h, Re):
-
-            return (1 / math.sqrt(f)) + 2*math.log((eps / (3.8 * D_h)) + (2.51 / (Re * math.sqrt(f))), 10) 
-
-        f_guess = 0.04
-        
         if eps is None:
             eps = 0.015 / 1000 # [mm] UPDATE - ALSO UPDATE FOR LPBF SURFACES
 
+        if Re <= 0:
+            raise ValueError(f"Re must be > 0 to compute friction factor, got Re={Re}.")
 
-        f = fsolve(colebrook_white, f_guess, args=(eps, D_h, Re))[0]
+        # Laminar regime (Darcy factor).
+        if Re < 2300.0:
+            return 64.0 / Re
 
-        return f
+        # Churchill correlation (Darcy factor): valid across laminar/transitional/turbulent
+        # and avoids iterative Colebrook root-finding instability.
+        rel_rough = eps / D_h
+        A = (2.457 * np.log(1.0 / (((7.0 / Re) ** 0.9) + (0.27 * rel_rough)))) ** 16
+        B = (37530.0 / Re) ** 16
+        f = 8.0 * (((8.0 / Re) ** 12) + (1.0 / ((A + B) ** 1.5))) ** (1.0 / 12.0)
+        return float(f)
 
 
     def regen_geometry(
@@ -1176,6 +1227,7 @@ class RegenCircuit:
         show_htc=True,
         show_coolant_htc_both=False,
         show_bartz_sigma=True,
+        show_heat_flux=True,
     ):
         #### ---- PLOTS ---- ####
         pa_to_ksi = 1.0 / 6894757.293168
@@ -1190,6 +1242,8 @@ class RegenCircuit:
                 axs[0].set_title("Regen Circuit Temperatures")
                 axs[0].set_ylabel("Temperature [K]")
                 axs[0].plot(self.engine.Contour_z, self.engine.T, color='orange', label='Combustion Gas Temp')
+                if self.tbc_thickness > 0.0:
+                    axs[0].plot(self.engine.Contour_z, self.T_tbc_arr, color='m', linestyle='--', label='TBC Surface Temp')
                 axs[0].plot(self.engine.Contour_z, self.T_hw_arr, color='r', label='Hot Wall Temp')
                 axs[0].plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
                 axs[0].plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
@@ -1332,8 +1386,18 @@ class RegenCircuit:
                 axs[1].set_visible(False)
             fig.tight_layout()
 
+        if show_heat_flux:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+            ax.plot(self.engine.Contour_z, self.q_flux_arr / 1e6, color='C3', label='Heat Flux')
+            ax.set_title("Gas-Side Heat Flux into Chamber Wall")
+            ax.set_xlabel("Axial Position [in]")
+            ax.set_ylabel("Heat Flux [MW/m²]")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+
         # Unit conversions and calculations prior to printing
-        self.channel_DP = (self.P_c_arr[-1] - self.P_c_arr[0]) / 6894.76 # Pa
+        self.channel_DP = float(np.sum(self.DP_arr)) / 6894.76 # [psid]
         boiling_temp_margin = float(np.min(self.coolant_boiling_arr - self.T_c_arr))
         coolant = Fluid("T", self.T_c_arr[-1], "P", self.P_c_arr[-1], self.coolantName)
         rho1 = coolant.rho
@@ -1348,12 +1412,22 @@ class RegenCircuit:
         print(f"Channel Coolant Mdot [kg/s]: {round(self.chan_mdot, 4)}")
         print(f"Total Coolant Mdot [kg/s]: {round(self.tot_coolant_mdot, 3)}")
         print(f"Channel DP [psid]: {round(self.channel_DP, 2)}")
+        print(f"Min Coolant Pressure [psia]: {round(float(np.min(self.P_c_arr)) / 6894.76, 2)}")
+        print(f"Max Coolant Velocity [m/s]: {round(float(np.max(self.coolant_vel_arr)), 2)}")
+        print(f"Max Friction Factor f_D [---]: {round(float(np.max(self.f_D_arr)), 4)}")
+        print(f"Regen Curve Length [m]: {round(self.regen_curve_length_m, 4)}")
+        print(f"Regen Curve Length [in]: {round(self.regen_curve_length_m / 0.0254, 2)}")
         print(f"# of Channels: {self.N}")
         print(f"Channel Width [mm]: {round(self.C_w * 1000, 2)}")
         print(f"Channel Height [mm]: {round(self.C_h * 1000, 2)}")
         print(f"Channel AR: {round(self.ch_AR, 2)}")
+        if self.tbc_thickness > 0.0:
+            print(f"TBC Thickness [mm]: {round(self.tbc_thickness * 1000, 3)}")
+            print(f"TBC k [W/m-K]: {self.tbc_k}")
+            print(f"Max TBC Surface Temp [K]: {round(float(np.max(self.T_tbc_arr)), 2)}")
         print(f"Max Hot Wall Temp [K]: {round(max(self.T_hw_arr), 2)}")
         print(f"Coolant Outlet Temp [K]: {round(max(self.T_c_arr), 2)}")
+        print(f"Max Heat Flux [MW/m^2]: {round(float(np.max(self.q_flux_arr)) / 1e6, 3)}")
         print(f"Coolant Boiling Temp Margin [K]: {round(boiling_temp_margin, 2)}")
 
         plt.show()

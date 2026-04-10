@@ -28,7 +28,7 @@ class Material:
 
         elif self.material_name == "AlSi10Mg":
             self.rho = 2670 # kg/m^3
-            self.k = 140 # W/mK
+            self.k = 160 # W/mK
             self.E = 70E9 # Pa
             self.alpha = 20.E-6 # m/m/C
             self.v = 0.35
