@@ -28,8 +28,10 @@ class Material:
 
         elif self.material_name == "AlSi10Mg":
             self.rho = 2670 # kg/m^3
-            self.k = 130 # W/mK
+            self.k = 140 # W/mK
             self.E = 70E9 # Pa
+            self.alpha = 20.E-6 # m/m/C
+            self.v = 0.35
             
             # Yield Stress vs. Temperature Lookup Table
             T = np.array([298.15, 323.15, 373.15, 423.15, 473.15, 523.15, 573.15, 623.15, 673.15]) # K

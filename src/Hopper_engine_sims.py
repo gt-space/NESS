@@ -29,6 +29,7 @@ show_dp = True                       # DP plot
 show_pressures = True               # Pressures plot
 show_qdot = True                    # Qdot plot
 show_re = True                      # Re plot
+show_pr = True                     # Pr plot
 show_coolant_density = True         # Coolant density plot
 show_coolant_velocity = True        # Coolant velocity plot
 show_wall_thermal_gradient = True   # Wall thermal gradient plot
@@ -39,17 +40,17 @@ show_coolant_htc_both = True       # If True, overlay Gnielinski and Dittus-Boel
 show_bartz_sigma = True             # Bartz sigma subplot
 
 # BARTZ T_wg ROOT SOLVER OPTIONS
-T_wg_bracket = (500.0, 2500.0)      # [K] global bracket for root solve
+T_wg_bracket = (300.0, 2500.0)      # [K] global bracket for root solve
 T_wg_residual_tol = 1e-2            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
-sigma_clamp = (0.5, 1.3)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
+sigma_clamp = (0.5, 1.5)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
 coolant_htc_correlation = "Dittus-Boelter"    # "Gnielinski" or "Dittus-Boelter"
 print_regen_station_rows = False   # If True, print per-station lines like "T_hw : … K" (tqdm still runs)
 
 # ENGINE / PERFORMANCE OUTPUTS
 display_nozzle_mesh = False         # Display mesh of the contour
-show_nozzle_plot = False            # Show engine contour plot
+show_nozzle_plot = True            # Show engine contour plot
 show_bartz_plot = False             # Show Plot of Bartz HTC
 show_gas_temp_plot = False          # Show Plot of Gas Temperatures along the contour
 show_engine_perf_outputs = True    # Show Engine Performance Outputs
@@ -73,10 +74,11 @@ oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 14.8 # psia
-MRcore = 1.8
+MRcore = 1.0
 CR = 5
 Lstar = 30 # in
-cstarEff = 0.85
+cstarEff = 1
+pcentFFC = 0.0
 numPts = 70
 bell = True
 frozen = True
@@ -111,6 +113,7 @@ if design_engine:
         CR = CR,
         Lstar = Lstar,
         cstarEff=cstarEff,
+        pcentFFC=pcentFFC,
         frozen=frozen,
         name=name,
         numPts=numPts,
@@ -171,13 +174,14 @@ if show_gas_props:
 t_w = 1 / 1000 # [mm] --> [m]
 N = 60
 C_w = 1 / 1000 # [mm] --> [m]
-C_h = 2 / 1000 # [mm] --> [m]
+C_h = 1 / 1000 # [mm] --> [m]
 coolantName = "Ethanol"
 tot_coolant_mdot = engine.fu_mdot # kg/s
 inlet_T_c = 288 # [K]
 inlet_P_c = 450 * 6894.7 # [psia] --> [Pa]
+coolant_temp_limit = None # [K]; set a float to override fluid saturation/pseudocritical limit
 # circuit_inlet = -100 # Not used for now
-material = Material("Pure Copper")
+material = Material("AlSi10Mg")
 
 #print(f"Fuel Mdot : {round(tot_coolant_mdot, 3)} kg/s")
 #print(f"OX Mdot : {round(engine.ox_mdot, 3)} kg/s")
@@ -213,6 +217,7 @@ if design_regen:
         fixed_sigma=(fixed_bartz_sigma if use_fixed_bartz_sigma else None),
         sigma_clamp=sigma_clamp,
         coolant_htc_correlation=coolant_htc_correlation,
+        coolant_temp_limit=coolant_temp_limit,
         print_station_rows=print_regen_station_rows,
     )
 
@@ -224,6 +229,7 @@ if design_regen:
             show_pressures=show_pressures,
             show_qdot=show_qdot,
             show_re=show_re,
+            show_pr=show_pr,
             show_coolant_density=show_coolant_density,
             show_coolant_velocity=show_coolant_velocity,
             show_wall_thermal_gradient=show_wall_thermal_gradient,

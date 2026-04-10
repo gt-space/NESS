@@ -467,6 +467,7 @@ class RegenCircuit:
         fixed_sigma=None,
         sigma_clamp=None,
         coolant_htc_correlation="Gnielinski",
+        coolant_temp_limit=None,
         print_station_rows=False,
     ):
         # Set fluid inlet position by default to bottom of nozzle
@@ -485,7 +486,7 @@ class RegenCircuit:
 
         # Calculate dz - use the arc length based on the specified dz NOT the dz since that will underestimate volume
         # will lead to underconservative heating
-        dz = (circuit_inlet_pos - (-self.engine.Contour_z[0] * 0.0254)) / self.engine.numPts
+        dz = np.abs(np.diff(self.engine.Contour_z * 0.0254))
         dr = np.diff(self.engine.Contour_r * 0.0254)
         ds = np.sqrt(dz**2 + dr**2)
 
@@ -512,19 +513,25 @@ class RegenCircuit:
         self.h_c_db_arr = np.empty(n_stations)
         self.DP_arr = np.empty(n_stations)
         self.Re = np.empty(n_stations)
+        self.Pr_arr = np.empty(n_stations)
         self.sigma_pt = np.empty(n_stations)
         self.sigma_tt = np.empty(n_stations)
         self.sigma_t = np.empty(n_stations)
         self.sigma_pl = np.empty(n_stations)
         self.sigma_l = np.empty(n_stations)
+        self.coolant_boiling_arr = np.empty(n_stations)
 
         # T and P Tracker
         P_c = inlet_pressure
         T_c = inlet_T_c
         
-        # Get Boiling Point
-        self.coolant_boiling = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
-        print(f" Coolant BP : {round(self.coolant_boiling, 2)} K")
+        # Inlet reference limit. If user provides coolant_temp_limit, use it everywhere.
+        if coolant_temp_limit is None:
+            self.coolant_boiling_inlet = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
+            print(f" Coolant BP (inlet P): {round(self.coolant_boiling_inlet, 2)} K")
+        else:
+            self.coolant_boiling_inlet = float(coolant_temp_limit)
+            print(f" Coolant temperature limit (user): {round(self.coolant_boiling_inlet, 2)} K")
 
         station_range = range(circuit_inlet, circuit_outlet - 1, -1)
         for i in tqdm(station_range):
@@ -550,7 +557,7 @@ class RegenCircuit:
                 fixed_sigma=fixed_sigma,
                 sigma_clamp=sigma_clamp,
             )
-            q_flux = qdot / ds[i] * ((2 * np.pi * self.engine.r_ch) / self.N) # W/m^2
+            q_flux = qdot / (ds[i] * ((2 * np.pi * self.engine.r_ch * 0.0254) / self.N)) # W/m^2
             
             # Stress Calculations
             sigma_pt, sigma_tt, sigma_t, sigma_pl, sigma_l = self.calculate_stress(
@@ -582,9 +589,16 @@ class RegenCircuit:
             T_c_new = ((qdot * dt) / (m * coolant.Cp)) + T_c
             T_c = T_c_new
 
-            # Boiling Check
-            if T_c > self.coolant_boiling:
-                raise ValueError(f" === Coolant boiled at {round(self.coolant_boiling, 2)} K!")
+            # Boiling limit at local (P, T): T_sat(P) drops as pressure drops along the channel.
+            if coolant_temp_limit is None:
+                coolant_boiling_local = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
+            else:
+                coolant_boiling_local = float(coolant_temp_limit)
+            if T_c > coolant_boiling_local:
+                raise ValueError(
+                    f" === Coolant above local boiling limit at z index {i}: "
+                    f"T_c={round(T_c, 2)} K vs limit {round(coolant_boiling_local, 2)} K at P={round(P_c / 6894.76, 2)} psia!"
+                )
 
             # Indexed update (faster than repeated np.append in loop).
             out_idx = i - circuit_outlet
@@ -601,11 +615,13 @@ class RegenCircuit:
             self.h_c_db_arr[out_idx] = h_c_db
             self.DP_arr[out_idx] = DP
             self.Re[out_idx] = Re
+            self.Pr_arr[out_idx] = coolant.Pr
             self.sigma_pt[out_idx] = sigma_pt
             self.sigma_tt[out_idx] = sigma_tt
             self.sigma_t[out_idx] = sigma_t
             self.sigma_pl[out_idx] = sigma_pl
             self.sigma_l[out_idx] = sigma_l
+            self.coolant_boiling_arr[out_idx] = coolant_boiling_local
 
             if print_station_rows:
                 z_in = float(self.engine.Contour_z[i])
@@ -624,9 +640,13 @@ class RegenCircuit:
                 print(f"qdot : {qdot:.4g} W")
                 print(f"coolant_vel : {coolant_vel:.3f} m/s")
                 print(f"Re : {Re:.1f}")
+                print(f"Pr : {coolant.Pr:.3f}")
                 print(f"dp : {DP / 6894.76:.3f} psid")
                 print(f"sigma : {sigma:.4f}")
                 print()
+
+        # Minimum local boiling limit along the channel (tightest vs bulk T_c for scalar summaries).
+        self.coolant_boiling = float(np.min(self.coolant_boiling_arr))
 
     def calculate_boiling_point(
         self,
@@ -1147,6 +1167,7 @@ class RegenCircuit:
         show_pressures=True,
         show_qdot=True,
         show_re=True,
+        show_pr=False,
         show_coolant_density=True,
         show_coolant_velocity=True,
         show_wall_thermal_gradient=True,
@@ -1158,7 +1179,6 @@ class RegenCircuit:
     ):
         #### ---- PLOTS ---- ####
         pa_to_ksi = 1.0 / 6894757.293168
-        boiling_limit = self.coolant_boiling
         coolant_rho_arr = np.array([
             PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
             for T_val, P_val in zip(self.T_c_arr, self.P_c_arr)
@@ -1173,7 +1193,13 @@ class RegenCircuit:
                 axs[0].plot(self.engine.Contour_z, self.T_hw_arr, color='r', label='Hot Wall Temp')
                 axs[0].plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
                 axs[0].plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
-                axs[0].axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
+                axs[0].plot(
+                    self.engine.Contour_z,
+                    self.coolant_boiling_arr,
+                    color='k',
+                    linestyle='--',
+                    label=f'{self.coolantName} Boiling limit (local P)',
+                )
                 axs[0].legend()
             else:
                 axs[0].set_visible(False)
@@ -1184,7 +1210,13 @@ class RegenCircuit:
                 axs[1].set_ylabel("Temperature [K]")
                 axs[1].plot(self.engine.Contour_z, self.T_cw_arr, color='b', label='Cold Wall Temp')
                 axs[1].plot(self.engine.Contour_z, self.T_c_arr, color='y', label='Bulk Coolant Temp')
-                axs[1].axhline(boiling_limit, color='k', linestyle='--', label=f'{self.coolantName} Boiling Temp')
+                axs[1].plot(
+                    self.engine.Contour_z,
+                    self.coolant_boiling_arr,
+                    color='k',
+                    linestyle='--',
+                    label=f'{self.coolantName} Boiling limit (local P)',
+                )
                 axs[1].legend()
             else:
                 axs[1].set_visible(False)
@@ -1211,41 +1243,37 @@ class RegenCircuit:
                 axs[1].set_visible(False)
             fig.tight_layout()
 
-        if show_qdot or show_re or show_coolant_density or show_coolant_velocity:
-            fig, axs = plt.subplots(2, 2, figsize=(12, 9), sharex=True)
+        if show_qdot or show_re or show_pr or show_coolant_density or show_coolant_velocity:
+            plot_specs = []
             if show_qdot:
-                axs[0, 0].plot(self.engine.Contour_z, self.Qdot_arr, label='Qdot')
-                axs[0, 0].set_title("Radial Heat Flow")
-                axs[0, 0].set_ylabel("Qdot [J]")
-                axs[0, 0].legend()
-            else:
-                axs[0, 0].set_visible(False)
-
+                plot_specs.append(("Radial Heat Flow", self.Qdot_arr, "Qdot", "Qdot [J]"))
             if show_re:
-                axs[0, 1].plot(self.engine.Contour_z, self.Re, label='Reynolds Number')
-                axs[0, 1].set_title("Coolant Re")
-                axs[0, 1].set_ylabel("Re [---]")
-                axs[0, 1].legend()
-            else:
-                axs[0, 1].set_visible(False)
-
+                plot_specs.append(("Coolant Re", self.Re, "Reynolds Number", "Re [---]"))
+            if show_pr:
+                plot_specs.append(("Coolant Pr", self.Pr_arr, "Prandtl Number", "Pr [---]"))
             if show_coolant_density:
-                axs[1, 0].plot(self.engine.Contour_z, coolant_rho_arr, label='Coolant Density')
-                axs[1, 0].set_title("Coolant Density")
-                axs[1, 0].set_xlabel("Axial Position [m]")
-                axs[1, 0].set_ylabel("Density [kg/m^3]")
-                axs[1, 0].legend()
-            else:
-                axs[1, 0].set_visible(False)
-
+                plot_specs.append(("Coolant Density", coolant_rho_arr, "Coolant Density", "Density [kg/m^3]"))
             if show_coolant_velocity:
-                axs[1, 1].plot(self.engine.Contour_z, self.coolant_vel_arr, label='Coolant Velocity')
-                axs[1, 1].set_title("Coolant Velocity")
-                axs[1, 1].set_xlabel("Axial Position [m]")
-                axs[1, 1].set_ylabel("Velocity [m/s]")
-                axs[1, 1].legend()
-            else:
-                axs[1, 1].set_visible(False)
+                plot_specs.append(("Coolant Velocity", self.coolant_vel_arr, "Coolant Velocity", "Velocity [m/s]"))
+
+            nplots = len(plot_specs)
+            ncols = 2
+            nrows = int(np.ceil(nplots / ncols))
+            fig, axs = plt.subplots(nrows, ncols, figsize=(12, 4 * nrows), sharex=True)
+            axs = np.atleast_1d(axs).ravel()
+
+            for ax, (title, yvals, label, ylab) in zip(axs, plot_specs):
+                ax.plot(self.engine.Contour_z, yvals, label=label)
+                ax.set_title(title)
+                ax.set_ylabel(ylab)
+                ax.legend()
+
+            for ax in axs[nplots:]:
+                ax.set_visible(False)
+
+            for ax in axs[:nplots]:
+                ax.set_xlabel("Axial Position [m]")
+
             fig.tight_layout()
 
         if show_wall_thermal_gradient or show_tangential_stresses or show_longitudinal_stresses:
@@ -1306,7 +1334,7 @@ class RegenCircuit:
 
         # Unit conversions and calculations prior to printing
         self.channel_DP = (self.P_c_arr[-1] - self.P_c_arr[0]) / 6894.76 # Pa
-        boiling_temp_margin = self.coolant_boiling - max(self.T_c_arr)
+        boiling_temp_margin = float(np.min(self.coolant_boiling_arr - self.T_c_arr))
         coolant = Fluid("T", self.T_c_arr[-1], "P", self.P_c_arr[-1], self.coolantName)
         rho1 = coolant.rho
         coolant = Fluid("T", self.T_c_arr[0], "P", self.P_c_arr[0], self.coolantName)
