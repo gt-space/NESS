@@ -413,8 +413,8 @@ class RegenCircuit:
 
         ## Fin Effective Area Calculations ##
         # Single Fin #
-        m = math.sqrt((h_c * (2 * self.f_w + 2 * dz)) / (material.k * self.f_w * dz))
-        eta_f = np.tanh(m * self.C_h)
+        m = math.sqrt((h_c * (2 * dz)) / (material.k * self.f_w * dz))
+        eta_f = np.tanh(m * self.C_h) / (m * self.C_h)
 
         # Multi-Fin #
         A_b = self.N * c_w * dz
@@ -425,7 +425,7 @@ class RegenCircuit:
         A_ch_eff = (eta_o * A_t) / self.N
 
         # Thermal Resistances
-        R_hghw = 1 / (h_hg * A_hwall_ch)
+        R_hghw = 1 / (0.7 * h_hg * A_hwall_ch)
         R_tbc = 0.0
         if self.tbc_thickness > 0.0 and self.tbc_k is not None:
             R_tbc = self.tbc_thickness / (self.tbc_k * A_hwall_ch)
@@ -589,7 +589,7 @@ class RegenCircuit:
                 fixed_sigma=fixed_sigma,
                 sigma_clamp=sigma_clamp,
             )
-            q_flux = qdot / (ds[i] * ((2 * np.pi * self.engine.r_ch * 0.0254) / self.N)) # W/m^2
+            q_flux = qdot / (ds[i] * ((2 * np.pi * self.engine.Contour_r[i] * 0.0254) / self.N)) # W/m^2
             
             # Stress Calculations
             sigma_pt, sigma_tt, sigma_t, sigma_pl, sigma_l = self.calculate_stress(
@@ -817,7 +817,7 @@ class RegenCircuit:
         '''
 
         if eps is None:
-            eps = 0.015 / 1000 # [mm] UPDATE - ALSO UPDATE FOR LPBF SURFACES
+            eps = 0.020 / 1000 # [mm] UPDATE - ALSO UPDATE FOR LPBF SURFACES
 
         if Re <= 0:
             raise ValueError(f"Re must be > 0 to compute friction factor, got Re={Re}.")

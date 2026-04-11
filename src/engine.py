@@ -34,6 +34,7 @@ class Engine:
     def __init__(self, thrust, Pc, Pe, MRcore, oxName, fuName, name, CR, Lstar, cstarEff, frozen, pcentFFC = 0.0, Pamb = 14.8, numPts = 200, verbose = False,
                  bell = True, chmbR=None, chmbL=None, contAngle=None, throatR=None, throatL=None, expAngle=None, exitR=None):
         self.thrust = thrust
+        self.Pc_psia = Pc
         self.Pc = Pc
         self.Pe = Pe
         self.Pamb = Pamb
@@ -138,42 +139,30 @@ class Engine:
 
         return z_coords, np.array(temp_r_coords)
 
-    def calcGasProperties(self, frozen=1):
-        # Area Ratio (A / A*) - DONE
-        # Mach Number - DONE
-        # P0 - DONE
-        # P - DONE
-        # T0 - DONE
-        # T - DONE
-        # Rho0 - DONE
-        # Rho - DONE
-        # Specific Enthalpy (h)
-        # Specific Heat constant Pressure (Cp) - DONE
-        # Specific Heat constant Volume (Cv)
-        # Gamma - DONE
-        # MW - DONE
-        # Speed of Sound (a)
-        # Viscosity (mu) - DONE
-        # Thermal Conductivity (k) - DONE
-        # Prandtl Number (Pr) - DONE
+    def calcGasProperties(self, frozen=1, Pc_psia_override=None, MR_override=None):
+        # Optionally override Pc and MR for off-design analysis (throttle sweeps, etc.)
+        if Pc_psia_override is not None:
+            self.Pc_psia = float(Pc_psia_override)
+        if MR_override is not None:
+            self.MRcore = float(MR_override)
+
+        # Reset Pc to psia for CEA calls (safe for re-entry).
+        self.Pc = self.Pc_psia
 
         # Initialize some Arrays
-        self.AreaRatio = np.array([]) # - DONE
-        self.M = np.array([]) # - DONE
-        self.P = np.array([]) # - DONE
-        self.T = np.array([]) # - DONE
-        self.rho = np.array([]) # - DONE
-        #self.h = np.array([])
-        #self.Cv = np.array([])
-        #self.a = np.array([])
+        self.AreaRatio = np.array([])
+        self.M = np.array([])
+        self.P = np.array([])
+        self.T = np.array([])
+        self.rho = np.array([])
 
         # Setup CEA Object, general calculations
         C = CEA_Obj(
             oxName=self.oxName, fuelName=self.fuName,
-            isp_units='sec',      # Isp in seconds (default)
-            cstar_units='m/s',    # C* in m/s (default is ft/sec)
-            pressure_units='psia',  # Chamber pressure units
-            temperature_units='K', # Temperature units
+            isp_units='sec',
+            cstar_units='m/s',
+            pressure_units='psia',
+            temperature_units='K',
             sonic_velocity_units='m/s',
             enthalpy_units='J/kg',
             density_units='kg/m^3',
@@ -181,11 +170,11 @@ class Engine:
             viscosity_units='poise',
             thermal_cond_units="W/cm-degC",
             )
-        T0 = C.get_Tcomb(self.Pc, self.MRcore)
+        T0 = C.get_Tcomb(self.Pc_psia, self.MRcore) * self.cstarEff**2 # Combustion temp knockdown
         self.Tcomb = float(T0)  # Chamber (combustion) temperature from CEA [K]
-        P0 = self.Pc
-        rho0 = C.get_Chamber_Density(self.Pc, self.MRcore)
-        self.cstar = C.get_Cstar(self.Pc, self.MRcore)
+        P0 = self.Pc_psia
+        rho0 = C.get_Chamber_Density(self.Pc_psia, self.MRcore)
+        self.cstar = C.get_Cstar(self.Pc_psia, self.MRcore)
 
         # Calculate Area Ratio
         for i in range(len(self.Contour_r)):
@@ -194,8 +183,8 @@ class Engine:
             self.AreaRatio = np.append(self.AreaRatio, AreaRat)
 
         # --- Chamber Gas Properties Extrapolation --- 
-        Cp_chamb, mu_chamb, k_chamb, Pr_chamb = C.get_Chamber_Transport(self.Pc, self.MRcore, frozen=frozen)
-        MW_chamb, gamma_chamb = C.get_Chamber_MolWt_gamma(self.Pc, self.MRcore)
+        Cp_chamb, mu_chamb, k_chamb, Pr_chamb = C.get_Chamber_Transport(self.Pc_psia, self.MRcore, frozen=frozen)
+        MW_chamb, gamma_chamb = C.get_Chamber_MolWt_gamma(self.Pc_psia, self.MRcore)
 
         # Assign Properties
         self.Cp = np.full(self.chamberEnd_ind + 1, Cp_chamb)
@@ -207,8 +196,8 @@ class Engine:
 
         # --- Converging Section Gas Properties (Linear Correlation) --- 
         # Throat Properties
-        Cp_t, mu_t, k_t, Pr_t = C.get_Throat_Transport(self.Pc, self.MRcore, frozen=frozen)
-        MW_t, gamma_t = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore, frozen=frozen)
+        Cp_t, mu_t, k_t, Pr_t = C.get_Throat_Transport(self.Pc_psia, self.MRcore, frozen=frozen)
+        MW_t, gamma_t = C.get_Throat_MolWt_gamma(self.Pc_psia, self.MRcore, frozen=frozen)
         
         # Property Z-Positions
         z_prop1 = self.Contour_z[self.chamberEnd_ind]
@@ -232,8 +221,8 @@ class Engine:
         self.gamma = np.concatenate((self.gamma, gamma))
 
         # --- Throat ---
-        Cp, mu, k, Pr = C.get_Throat_Transport(self.Pc, self.MRcore, frozen=frozen)
-        MW, gamma = C.get_Throat_MolWt_gamma(self.Pc, self.MRcore, frozen=frozen)
+        Cp, mu, k, Pr = C.get_Throat_Transport(self.Pc_psia, self.MRcore, frozen=frozen)
+        MW, gamma = C.get_Throat_MolWt_gamma(self.Pc_psia, self.MRcore, frozen=frozen)
         
         # Assign Properties
         self.Cp = np.append(self.Cp, Cp)
@@ -245,8 +234,8 @@ class Engine:
 
         # --- Diverging Section Gas Properties --- 
         for eps in self.AreaRatio[self.throat_ind + 1 :]:
-            Cp, mu, k, Pr = C.get_Exit_Transport(self.Pc, self.MRcore, eps=eps, frozen=frozen)
-            MW, gamma = C.get_exit_MolWt_gamma(self.Pc, self.MRcore, eps=eps, frozen=frozen)
+            Cp, mu, k, Pr = C.get_Exit_Transport(self.Pc_psia, self.MRcore, eps=eps, frozen=frozen)
+            MW, gamma = C.get_exit_MolWt_gamma(self.Pc_psia, self.MRcore, eps=eps, frozen=frozen)
 
             # Assign Properties
             self.Cp = np.append(self.Cp, Cp)
@@ -272,7 +261,14 @@ class Engine:
         
         # Unit Conversions (for Bartz)
         self.mu = self.mu / 10 # [Poise] --> [Pa * s]
-        self.Pc = self.Pc * 6894.76 # [psia] --> [Pa]
+        self.Pc = self.Pc_psia * 6894.76 # [psia] --> [Pa]
+
+        # Compute mass flows from Pc, cstar, At for off-design re-calls.
+        # At is in in^2; cstar in m/s; Pc in Pa.
+        At_m2 = self.At * 0.00064516  # in^2 → m^2
+        tot_mdot = (self.Pc * At_m2) / self.cstar  # kg/s
+        self.fu_mdot = tot_mdot / (1.0 + self.MRcore)
+        self.ox_mdot = tot_mdot - self.fu_mdot
 
     def exportGeometry(self, filename):
         # Export the nozzle contour as [X, Y] coordinates in a .txt file for import into CAD.

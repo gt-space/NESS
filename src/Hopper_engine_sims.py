@@ -18,10 +18,10 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True                 # Design engine contour and performance calculations
-design_regen = True                  # Solve regen circuit and performance analysis
+design_regen = False                  # Solve regen circuit and performance analysis
 
 # REGEN OUTPUT PLOT OPTIONS
-display_regen_contour_plot = False   # Output Plot of Regen Channels
+display_regen_contour_plot = True   # Output Plot of Regen Channels
 display_regen_outputs = True        # Show plots of regen circuit
 show_regen_temps = True             # Regen Circuit Temps plot
 show_cold_temps = False              # Cold Temps plot
@@ -41,7 +41,7 @@ show_bartz_sigma = True             # Bartz sigma subplot
 show_heat_flux = True               # Heat flux (MW/m^2) plot
 
 # BARTZ T_wg ROOT SOLVER OPTIONS
-T_wg_bracket = (300.0, 2500.0)      # [K] global bracket for root solve
+T_wg_bracket = (50.0, 3500.0)      # [K] global bracket for root solve
 T_wg_residual_tol = 1e-1            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
@@ -74,13 +74,13 @@ fuName = "JetA"  # Jet-A
 oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
-Pe = 14.8 # psia
-MRcore = 1.0
-CR = 5
-Lstar = 30 # in
-cstarEff = 1
+Pe = 18.8 # psia
+MRcore = 1.25
+CR = 6
+Lstar = 35 # in
+cstarEff = 0.85
 pcentFFC = 0.0
-numPts = 70
+numPts = 100
 bell = True
 frozen = True
 
@@ -172,16 +172,16 @@ if show_gas_props:
     engine.plot_gas_props()
 
 ### --- REGEN CIRCUIT INPUTS --- ###
-t_w = 0.7 / 1000 # [mm] --> [m]
-N = 50
+t_w = 1 / 1000 # [mm] --> [m]
+N = 49
 C_w = 1 / 1000 # [mm] --> [m]
 C_h = 2 / 1000 # [mm] --> [m]
 coolantName = "n-Decane"
 tot_coolant_mdot = engine.fu_mdot # kg/s
 inlet_T_c = 288 # [K]
-inlet_P_c = 450 * 6894.7 # [psia] --> [Pa]
+inlet_P_c = 410 * 6894.7 # [psia] --> [Pa]
 coolant_temp_limit = 540 # [K]; set a float to override fluid saturation/pseudocritical limit, set as JetA
-tbc_thickness = 0.045 / 1000  # [mm] → [m]; set 0 for no coating
+tbc_thickness = 0.0 / 1000  # [mm] → [m]; set 0 for no coating
 tbc_k = 1.0                 # [W/m-K] thermal conductivity of TBC (only used when tbc_thickness > 0)
 # circuit_inlet = -100 # Not used for now
 material = Material("AlSi10Mg")
