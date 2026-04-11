@@ -18,27 +18,27 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True                 # Design engine contour and performance calculations
-design_regen = False                  # Solve regen circuit and performance analysis
+design_regen = True                  # Solve regen circuit and performance analysis
 
 # REGEN OUTPUT PLOT OPTIONS
-display_regen_contour_plot = True   # Output Plot of Regen Channels
-display_regen_outputs = True        # Show plots of regen circuit
-show_regen_temps = True             # Regen Circuit Temps plot
+display_regen_contour_plot = False   # Output Plot of Regen Channels
+display_regen_outputs = False        # Show plots of regen circuit
+show_regen_temps = False             # Regen Circuit Temps plot
 show_cold_temps = False              # Cold Temps plot
-show_dp = True                       # DP plot
-show_pressures = True               # Pressures plot
-show_qdot = True                    # Qdot plot
-show_re = True                      # Re plot
-show_pr = True                     # Pr plot
-show_coolant_density = True         # Coolant density plot
-show_coolant_velocity = True        # Coolant velocity plot
-show_wall_thermal_gradient = True   # Wall thermal gradient plot
-show_tangential_stresses = True     # Tangential stresses plot
-show_longitudinal_stresses = True   # Longitudinal stresses plot
-show_htc = True                     # HTC plot
-show_coolant_htc_both = True       # If True, overlay Gnielinski and Dittus-Boelter coolant HTCs
-show_bartz_sigma = True             # Bartz sigma subplot
-show_heat_flux = True               # Heat flux (MW/m^2) plot
+show_dp = False                       # DP plot
+show_pressures = False               # Pressures plot
+show_qdot = False                    # Qdot plot
+show_re = False                      # Re plot
+show_pr = False                     # Pr plot
+show_coolant_density = False         # Coolant density plot
+show_coolant_velocity = False        # Coolant velocity plot
+show_wall_thermal_gradient = False   # Wall thermal gradient plot
+show_tangential_stresses = False     # Tangential stresses plot
+show_longitudinal_stresses = False   # Longitudinal stresses plot
+show_htc = False                     # HTC plot
+show_coolant_htc_both = False       # If True, overlay Gnielinski and Dittus-Boelter coolant HTCs
+show_bartz_sigma = False             # Bartz sigma subplot
+show_heat_flux = False               # Heat flux (MW/m^2) plot
 
 # BARTZ T_wg ROOT SOLVER OPTIONS
 T_wg_bracket = (50.0, 3500.0)      # [K] global bracket for root solve
@@ -52,9 +52,9 @@ print_regen_station_rows = False   # If True, print per-station lines like "T_hw
 # ENGINE / PERFORMANCE OUTPUTS
 display_nozzle_mesh = False         # Display mesh of the contour
 show_nozzle_plot = True            # Show engine contour plot
-show_bartz_plot = False             # Show Plot of Bartz HTC
-show_gas_temp_plot = False          # Show Plot of Gas Temperatures along the contour
-show_engine_perf_outputs = True    # Show Engine Performance Outputs
+show_bartz_plot = True             # Show Plot of Bartz HTC
+show_gas_temp_plot = True          # Show Plot of Gas Temperatures along the contour
+show_engine_perf_outputs = False    # Show Engine Performance Outputs
 show_gas_props = False              # Generate plots of ALL CEA gas properties along the contour            
 # Chamber Tcomb vs MR: RocketCEA-only sweep via utils (fast). MR_sweep_range None => prompt at run.
 show_chamber_T_vs_MR = False
@@ -62,11 +62,11 @@ MR_sweep_range = (0.5, 4)         # (MR_min, MR_max); set None to prompt for min
 num_MR_sweep_points = 25
 
 # FILE EXPORT
-export_nozzle = False                # Export Nozzle as .txt to CAD    
+export_nozzle = True                # Export Nozzle as .txt to CAD    
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
-export_bartz_data = False            # Export Bartz HTC to a Excel file
-export_gas_temps = False             # Export Gas Temps to an Excel file
-export_pressures = False             # Export Pressures to an Excel file
+export_bartz_data = True            # Export Bartz HTC to a Excel file
+export_gas_temps = True             # Export Gas Temps to an Excel file
+export_pressures = True             # Export Pressures to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -81,17 +81,17 @@ Lstar = 35 # in
 cstarEff = 0.85
 pcentFFC = 0.0
 numPts = 100
-bell = True
+bell = False
 frozen = True
 
 ### --- Conical Engine Inputs --- ###
-chmbR = 1.35 # in
-chmbL = 4.066 # in, cylindrical portion of chamber
+chmbR = 1.42 # in
+chmbL = 4 # in, cylindrical portion of chamber
 contAngle = 45 # degrees
-throatR = 0.603 # in
+throatR = 0.58 # in
 throatL = 1/8 # in
 exit_angle = 15 # degrees
-exitR = 1.151 # in
+exitR = .9925 # in
 
 # 40 in L* is what Vespula Heatsink uses
 # L* = 43 in
@@ -260,7 +260,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("HTC_550lbf_FIXED_ConicalV3.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("BartzHeatsink.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
@@ -273,7 +273,7 @@ if show_gas_temp_plot:
 if export_gas_temps:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.T))
-    np.savetxt("Hopper_Gas_Temps_550lbf_ConicalV3.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
+    np.savetxt("TempsHeatsink.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
 
 ### --- RUNTIME ----
 end_time = time.time()
@@ -298,13 +298,13 @@ if show_nozzle_plot:
         plt.show()
 
 if export_nozzle:
-    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
+    engine.exportGeometry(filename="ContourHeatsink.txt")
 
 
 if export_pressures:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.P))
-    np.savetxt("Hopper_Pressures_550lbf_ConicalV3.csv", data, delimiter=",", header="X Position (in), Pressure (Psia)", comments="")
+    np.savetxt("PressuresHeatsink.csv", data, delimiter=",", header="X Position (in), Pressure (Psia)", comments="")
 
 # Show Engine Performance Outputs
 if show_engine_perf_outputs:
