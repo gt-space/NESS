@@ -64,9 +64,9 @@ num_MR_sweep_points = 25
 # FILE EXPORT
 export_nozzle = True                # Export Nozzle as .txt to CAD    
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
-export_bartz_data = True            # Export Bartz HTC to a Excel file
-export_gas_temps = True             # Export Gas Temps to an Excel file
-export_pressures = True             # Export Pressures to an Excel file
+export_bartz_data = False        # Export Bartz HTC to a Excel file
+export_gas_temps = False         # Export Gas Temps to an Excel file
+export_pressures = False         # Export Pressures to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
