@@ -64,9 +64,9 @@ num_MR_sweep_points = 25
 # FILE EXPORT
 export_nozzle = False                # Export Nozzle as .txt to CAD    
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
-export_bartz_data = False        # Export Bartz HTC to a Excel file
-export_gas_temps = False         # Export Gas Temps to an Excel file
-export_pressures = False         # Export Pressures to an Excel file
+export_bartz_data = True        # Export Bartz HTC to a Excel file
+export_gas_temps = True         # Export Gas Temps to an Excel file
+export_pressures = True         # Export Pressures to an Excel file
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
 name = "Hopper SN1"
@@ -75,13 +75,13 @@ oxName = "LOX"
 thrust = 500 # [lbf] --> [N]
 Pc = 300 # psia
 Pe = 18.8 # psia
-MRcore = 1.25
+MRcore = 1.4
 CR = 6
 Lstar = 35 # in
-cstarEff = 0.85
+cstarEff = 1
 pcentFFC = 0.0
 numPts = 100
-bell = True
+bell = False
 frozen = True
 
 ### --- Conical Engine Inputs --- ###
@@ -260,7 +260,7 @@ if show_bartz_plot:
 
 if export_bartz_data:
     data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
-    np.savetxt("BartzHeatsink.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
+    np.savetxt("BartzHeatsinkMax.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
 
 if show_gas_temp_plot:
     plt.figure()
@@ -273,7 +273,7 @@ if show_gas_temp_plot:
 if export_gas_temps:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.T))
-    np.savetxt("TempsHeatsink.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
+    np.savetxt("TempsHeatsinkMax.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
 
 ### --- RUNTIME ----
 end_time = time.time()
@@ -304,7 +304,7 @@ if export_nozzle:
 if export_pressures:
     import numpy as np
     data = np.column_stack((engine.Contour_z, engine.P))
-    np.savetxt("PressuresHeatsink.csv", data, delimiter=",", header="X Position (in), Pressure (Psia)", comments="")
+    np.savetxt("PressuresHeatsinkMax.csv", data, delimiter=",", header="X Position (in), Pressure (Psia)", comments="")
 
 # Show Engine Performance Outputs
 if show_engine_perf_outputs:

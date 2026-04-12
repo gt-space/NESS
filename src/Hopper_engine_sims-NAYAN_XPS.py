@@ -1,0 +1,311 @@
+import os
+from pathlib import Path
+
+print("CWD =", os.getcwd())
+print("CSV will be at =", Path("Hopper_Bartz_HTC_550lbf_2_2_26.csv").resolve())
+
+#import regen_circuit as ta
+from materials import Material
+from regen_circuit import RegenCircuit
+import numpy as np
+from engine import Engine
+from utils import cea_chamber_tcomb_mr_sweep
+import time
+import matplotlib.pyplot as plt
+
+### --- RUNTIME TRACKER --- ###
+start_time = time.time()
+
+### --- DESIGN & PLOT OPTIONS --- ###
+design_engine = True                 # Design engine contour and performance calculations
+design_regen = True                  # Solve regen circuit and performance analysis
+
+# REGEN OUTPUT PLOT OPTIONS
+display_regen_contour_plot = False   # Output Plot of Regen Channels
+display_regen_outputs = False        # Show plots of regen circuit
+show_regen_temps = False             # Regen Circuit Temps plot
+show_cold_temps = False              # Cold Temps plot
+show_dp = False                       # DP plot
+show_pressures = False               # Pressures plot
+show_qdot = False                    # Qdot plot
+show_re = False                      # Re plot
+show_pr = False                     # Pr plot
+show_coolant_density = False         # Coolant density plot
+show_coolant_velocity = False        # Coolant velocity plot
+show_wall_thermal_gradient = False   # Wall thermal gradient plot
+show_tangential_stresses = False     # Tangential stresses plot
+show_longitudinal_stresses = False   # Longitudinal stresses plot
+show_htc = False                     # HTC plot
+show_coolant_htc_both = False       # If True, overlay Gnielinski and Dittus-Boelter coolant HTCs
+show_bartz_sigma = False             # Bartz sigma subplot
+show_heat_flux = False               # Heat flux (MW/m^2) plot
+
+# BARTZ T_wg ROOT SOLVER OPTIONS
+T_wg_bracket = (50.0, 3500.0)      # [K] global bracket for root solve
+T_wg_residual_tol = 1e-1            # [K] residual tolerance for T_wg - T_hw
+use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
+fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
+sigma_clamp = (0.5, 1.5)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
+coolant_htc_correlation = "Dittus-Boelter"    # "Gnielinski" or "Dittus-Boelter"
+print_regen_station_rows = False   # If True, print per-station lines like "T_hw : … K" (tqdm still runs)
+
+# ENGINE / PERFORMANCE OUTPUTS
+display_nozzle_mesh = False         # Display mesh of the contour
+show_nozzle_plot = True            # Show engine contour plot
+show_bartz_plot = True             # Show Plot of Bartz HTC
+show_gas_temp_plot = True          # Show Plot of Gas Temperatures along the contour
+show_engine_perf_outputs = False    # Show Engine Performance Outputs
+show_gas_props = False              # Generate plots of ALL CEA gas properties along the contour            
+# Chamber Tcomb vs MR: RocketCEA-only sweep via utils (fast). MR_sweep_range None => prompt at run.
+show_chamber_T_vs_MR = False
+MR_sweep_range = (0.5, 4)         # (MR_min, MR_max); set None to prompt for min,max when plot enabled
+num_MR_sweep_points = 25
+
+# FILE EXPORT
+export_nozzle = False                # Export Nozzle as .txt to CAD    
+export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
+export_bartz_data = False        # Export Bartz HTC to a Excel file
+export_gas_temps = False         # Export Gas Temps to an Excel file
+export_pressures = False         # Export Pressures to an Excel file
+
+### --- ENGINE PERFORMANCE INPUTS --- ###
+name = "Hopper SN1"
+fuName = "JetA"  # Jet-A
+oxName = "LOX"
+thrust = 500 # [lbf] --> [N]
+Pc = 300 # psia
+Pe = 18.8 # psia
+MRcore = 1.4
+CR = 6
+Lstar = 35 # in
+cstarEff = 1
+pcentFFC = 0.0
+numPts = 100
+bell = False
+frozen = True
+
+### --- Conical Engine Inputs --- ###
+chmbR = 1.42 # in
+chmbL = 4 # in, cylindrical portion of chamber
+contAngle = 45 # degrees
+throatR = 0.58 # in
+throatL = 1/8 # in
+exit_angle = 15 # degrees
+exitR = .9925 # in
+
+# 40 in L* is what Vespula Heatsink uses
+# L* = 43 in
+# CR = 6.5
+
+# L* = 30 in
+# CR = 5 
+
+### --- MAIN CODE --- ###
+
+if design_engine:
+    # Create Engine
+    engine = Engine(
+        thrust = thrust,
+        Pc = Pc,
+        Pe = Pe,
+        MRcore = MRcore,
+        oxName=oxName,
+        fuName=fuName,
+        CR = CR,
+        Lstar = Lstar,
+        cstarEff=cstarEff,
+        pcentFFC=pcentFFC,
+        frozen=frozen,
+        name=name,
+        numPts=numPts,
+        verbose=display_nozzle_mesh,
+        bell=bell, 
+        chmbR=chmbR, 
+        chmbL=chmbL, 
+        contAngle=contAngle, 
+        throatR=throatR, 
+        throatL=throatL, 
+        expAngle=exit_angle, 
+        exitR=exitR)
+
+# Chamber combustion temperature vs mixture ratio (RocketCEA Tcomb only; no per-MR Engine)
+if design_engine and show_chamber_T_vs_MR:
+    _mr_range = MR_sweep_range
+    if _mr_range is None:
+        _raw = input("Enter MR sweep min and max (comma-separated, e.g. 1.0,2.5): ").strip()
+        _parts = [float(x.strip()) for x in _raw.split(",")]
+        if len(_parts) != 2:
+            raise ValueError("Expected two values: MR_min, MR_max")
+        _mr_range = (min(_parts), max(_parts))
+    mr_lo, mr_hi = float(_mr_range[0]), float(_mr_range[1])
+    mr_axis, tcomb_axis, tcomb_at_mrcore = cea_chamber_tcomb_mr_sweep(
+        oxName,
+        fuName,
+        Pc,
+        mr_lo,
+        mr_hi,
+        num_MR_sweep_points,
+        mr_highlight=MRcore,
+    )
+    plt.figure()
+    plt.plot(mr_axis, tcomb_axis, color="C0", label="Tcomb (CEA)")
+    plt.scatter(
+        [MRcore],
+        [tcomb_at_mrcore],
+        color="C3",
+        s=80,
+        zorder=5,
+        edgecolors="black",
+        linewidths=0.8,
+        label=f"MRcore = {MRcore}",
+    )
+    plt.xlabel("Mixture ratio O/F")
+    plt.ylabel("Chamber temperature Tcomb (K)")
+    plt.title(f"Tcomb vs MR ({oxName} / {fuName}, Pc = {Pc} psia)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# Gas Props
+if show_gas_props:
+    engine.plot_gas_props()
+
+### --- REGEN CIRCUIT INPUTS --- ###
+t_w = 1 / 1000 # [mm] --> [m]
+N = 49
+C_w = 1 / 1000 # [mm] --> [m]
+C_h = 2 / 1000 # [mm] --> [m]
+coolantName = "n-Decane"
+tot_coolant_mdot = engine.fu_mdot # kg/s
+inlet_T_c = 288 # [K]
+inlet_P_c = 410 * 6894.7 # [psia] --> [Pa]
+coolant_temp_limit = 540 # [K]; set a float to override fluid saturation/pseudocritical limit, set as JetA
+tbc_thickness = 0.0 / 1000  # [mm] → [m]; set 0 for no coating
+tbc_k = 1.0                 # [W/m-K] thermal conductivity of TBC (only used when tbc_thickness > 0)
+# circuit_inlet = -100 # Not used for now
+material = Material("AlSi10Mg")
+
+#print(f"Fuel Mdot : {round(tot_coolant_mdot, 3)} kg/s")
+#print(f"OX Mdot : {round(engine.ox_mdot, 3)} kg/s")
+#print(f"Throat Diameter : {engine.Dt * 39.3701} in")
+
+### --- REGEN CIRCUIT CONSTRAINTS --- ###
+T_hw_max = 1050 # K
+channel_dp_max = 100 # [psid] --> [Pa]
+
+# Create Regen Circuit
+if design_regen:
+
+    regen_circuit = RegenCircuit(
+        t_w=t_w,
+        material=material,
+        tot_coolant_mdot=tot_coolant_mdot,
+        coolantName=coolantName,
+        C_h=C_h,
+        engine=engine,
+        N=N,
+        C_w=C_w,
+        tbc_thickness=tbc_thickness,
+        tbc_k=tbc_k,
+    )
+
+    if display_regen_contour_plot:
+        regen_circuit.plot_regen_geometry(engine)
+
+    # Solve Regen Circuit
+    regen_circuit.solve_circuit(
+        inlet_T_c=inlet_T_c,
+        inlet_pressure=inlet_P_c,
+        T_wg_bracket=T_wg_bracket,
+        T_wg_residual_tol=T_wg_residual_tol,
+        fixed_sigma=(fixed_bartz_sigma if use_fixed_bartz_sigma else None),
+        sigma_clamp=sigma_clamp,
+        coolant_htc_correlation=coolant_htc_correlation,
+        coolant_temp_limit=coolant_temp_limit,
+        print_station_rows=print_regen_station_rows,
+    )
+
+    if display_regen_outputs:
+        regen_circuit.outputs(
+            show_regen_temps=show_regen_temps,
+            show_cold_temps=show_cold_temps,
+            show_dp=show_dp,
+            show_pressures=show_pressures,
+            show_qdot=show_qdot,
+            show_re=show_re,
+            show_pr=show_pr,
+            show_coolant_density=show_coolant_density,
+            show_coolant_velocity=show_coolant_velocity,
+            show_wall_thermal_gradient=show_wall_thermal_gradient,
+            show_tangential_stresses=show_tangential_stresses,
+            show_longitudinal_stresses=show_longitudinal_stresses,
+            show_htc=show_htc,
+            show_coolant_htc_both=show_coolant_htc_both,
+            show_bartz_sigma=show_bartz_sigma,
+            show_heat_flux=show_heat_flux,
+        ) # Plot regen circuit values
+
+    if export_regen_chans:
+        regen_circuit.generate_single_channel_curves()
+
+if show_bartz_plot:
+    print(regen_circuit.h_hg_arr)
+    plt.figure()
+    plt.title("Bartz Testing")
+    plt.xlabel("Axial Position (in)")
+    plt.ylabel("HTC (W/m^2-K)")
+    plt.plot(engine.Contour_z, regen_circuit.h_hg_arr)
+    plt.show()
+
+if export_bartz_data:
+    data = np.column_stack((engine.Contour_z, regen_circuit.h_hg_arr))
+    np.savetxt("BartzHeatsinkMax.csv", data, delimiter=",", header="X Position (in), HTC (W/m^2-K)", comments="")
+
+if show_gas_temp_plot:
+    plt.figure()
+    plt.title("Temps vs Position")
+    plt.xlabel("Axial Position (in)")
+    plt.ylabel("Temperature (K)")
+    plt.plot(engine.Contour_z, engine.T)
+    plt.show()
+
+if export_gas_temps:
+    import numpy as np
+    data = np.column_stack((engine.Contour_z, engine.T))
+    np.savetxt("TempsHeatsinkMax.csv", data, delimiter=",", header="X Position (in), Gas Temperature (K)", comments="")
+
+### --- RUNTIME ----
+end_time = time.time()
+print(f"Runtime: {round(end_time - start_time, 2)} sec")
+
+### --- PLOT OUTPUTS ---
+
+# Plot Engine Contour
+if show_nozzle_plot:
+    if bell:
+        engine.R.geomObj.plot_geometry(title=f'Hopper Engine Profile - {thrust} lbf', show_grid=True)
+    else:
+        plt.figure(figsize=(10, 5))
+        plt.plot(engine.Contour_z, engine.Contour_r, color='blue')
+        plt.plot(engine.Contour_z, -np.array(engine.Contour_r), color='blue')
+        plt.plot([engine.Contour_z[0], engine.Contour_z[-1]], [0, 0], 'k--', linewidth=1)
+        plt.title(f'Hopper Engine Profile - {thrust} lbf (Conical)')
+        plt.xlabel('Axial Distance (in)')
+        plt.ylabel('Radial Distance (in)')
+        plt.grid()
+        plt.axis('equal')
+        plt.show()
+
+if export_nozzle:
+    engine.exportGeometry(filename="ContourHeatsink.txt")
+
+
+if export_pressures:
+    import numpy as np
+    data = np.column_stack((engine.Contour_z, engine.P))
+    np.savetxt("PressuresHeatsinkMax.csv", data, delimiter=",", header="X Position (in), Pressure (Psia)", comments="")
+
+# Show Engine Performance Outputs
+if show_engine_perf_outputs:
+    print(engine.R.get_summ_str())
