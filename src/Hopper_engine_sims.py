@@ -62,7 +62,7 @@ MR_sweep_range = (0.5, 4)         # (MR_min, MR_max); set None to prompt for min
 num_MR_sweep_points = 25
 
 # FILE EXPORT
-export_nozzle = True                # Export Nozzle as .txt to CAD    
+export_nozzle = False                # Export Nozzle as .txt to CAD    
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
 export_bartz_data = False        # Export Bartz HTC to a Excel file
 export_gas_temps = False         # Export Gas Temps to an Excel file
@@ -81,7 +81,7 @@ Lstar = 35 # in
 cstarEff = 0.85
 pcentFFC = 0.0
 numPts = 100
-bell = False
+bell = True
 frozen = True
 
 ### --- Conical Engine Inputs --- ###
