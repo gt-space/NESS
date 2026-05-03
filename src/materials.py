@@ -28,7 +28,7 @@ class Material:
 
         elif self.material_name == "AlSi10Mg":
             self.rho = 2670 # kg/m^3
-            self.k = 160 # W/mK
+            self.k = 140 # W/mK
             self.E = 70E9 # Pa
             self.alpha = 20.E-6 # m/m/C
             self.v = 0.35
@@ -37,6 +37,15 @@ class Material:
             T = np.array([298.15, 323.15, 373.15, 423.15, 473.15, 523.15, 573.15, 623.15, 673.15]) # K
             sigma_y = np.array([29.587752, 28.717524, 26.251878, 26.396916, 22.916004, 19.145016, 10.15266, 4.35114, 1.740456]) # ksi
             self.stress_interp = PchipInterpolator(T, sigma_y)
+
+        elif self.material_name == "GRCop-42":
+            self.rho = 8960 # kg/m^3 - UPDATE
+            self.E = 110E9 # Pa - UPDATE
+            self.k = 344 # W/mK - UPDATE
+            self.Cp = 385 # J/kgK - UPDATE
+            self.MeltingPoint = 1350 # K - UPDATE
+            self.v = 0.34 # - UPDATE
+            self.alpha = 24.8E-6 # m/m/C - UPDATE
 
         '''
         elif self.material_name == "316L SS":

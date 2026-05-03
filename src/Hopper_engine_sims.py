@@ -1,10 +1,7 @@
 import os
 from pathlib import Path
 
-print("CWD =", os.getcwd())
-print("CSV will be at =", Path("Hopper_Bartz_HTC_550lbf_2_2_26.csv").resolve())
 
-#import regen_circuit as ta
 from materials import Material
 from regen_circuit import RegenCircuit
 import numpy as np
@@ -18,7 +15,7 @@ start_time = time.time()
 
 ### --- DESIGN & PLOT OPTIONS --- ###
 design_engine = True                 # Design engine contour and performance calculations
-design_regen = False                  # Solve regen circuit and performance analysis
+design_regen = True                  # Solve regen circuit and performance analysis
 
 # REGEN OUTPUT PLOT OPTIONS
 display_regen_contour_plot = True   # Output Plot of Regen Channels
@@ -46,7 +43,7 @@ T_wg_residual_tol = 1e-1            # [K] residual tolerance for T_wg - T_hw
 use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed value
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
 sigma_clamp = (0.5, 1.5)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
-coolant_htc_correlation = "Dittus-Boelter"    # "Gnielinski" or "Dittus-Boelter"
+coolant_htc_correlation = "Gnielinski"    # "Gnielinski" or "Dittus-Boelter"
 print_regen_station_rows = False   # If True, print per-station lines like "T_hw : … K" (tqdm still runs)
 
 # ENGINE / PERFORMANCE OUTPUTS
@@ -62,23 +59,26 @@ MR_sweep_range = (0.5, 4)         # (MR_min, MR_max); set None to prompt for min
 num_MR_sweep_points = 25
 
 # FILE EXPORT
-export_nozzle = False                # Export Nozzle as .txt to CAD    
+export_nozzle = False                # Export inner (ID) nozzle contour as .txt to CAD
+export_nozzle_outer = False          # Export outer (OD) contour using nozzle_wall_od_thickness_in
 export_regen_chans = False           # Export Regen Circuit Channelas as a .txt to CAD
 export_bartz_data = False            # Export Bartz HTC to a Excel file
 export_gas_temps = False             # Export Gas Temps to an Excel file
 export_pressures = False             # Export Pressures to an Excel file
+export_regen_performance_excel = False   # Export axial regen performance outputs to Excel (.xlsx)
+regen_performance_excel_filename = "Test Case 3.xlsx"
 
 ### --- ENGINE PERFORMANCE INPUTS --- ###
-name = "Hopper SN1"
-fuName = "JetA"  # Jet-A
+name = "Vespula Regen"
+fuName = "RP-1"  # Jet-A
 oxName = "LOX"
-thrust = 500 # [lbf] --> [N]
-Pc = 300 # psia
-Pe = 18.8 # psia
-MRcore = 1.25
-CR = 6
-Lstar = 35 # in
-cstarEff = 0.85
+thrust = 2272 # [lbf] --> [N]
+Pc = 244.8 # psia
+Pe = 6.94 # psia
+MRcore = 2
+CR = 3.69
+Lstar = 30 # in
+cstarEff = 0.9
 pcentFFC = 0.0
 numPts = 100
 bell = True
@@ -173,18 +173,20 @@ if show_gas_props:
 
 ### --- REGEN CIRCUIT INPUTS --- ###
 t_w = 1 / 1000 # [mm] --> [m]
-N = 49
+nozzle_wall_od_thickness_in = 0.25  # [in] ID→OD structural thickness for export_nozzle_outer (CAD outer contour)
+N = 126
 C_w = 1 / 1000 # [mm] --> [m]
-C_h = 2 / 1000 # [mm] --> [m]
-coolantName = "n-Decane"
+C_h = 3 / 1000 # [mm] --> [m]
+heat_flux_knockdown = 1
+coolantName = "n-Dodecane"
 tot_coolant_mdot = engine.fu_mdot # kg/s
-inlet_T_c = 288 # [K]
-inlet_P_c = 410 * 6894.7 # [psia] --> [Pa]
-coolant_temp_limit = 540 # [K]; set a float to override fluid saturation/pseudocritical limit, set as JetA
+inlet_T_c = 300 # [K]
+inlet_P_c = 400 * 6894.7 # [psia] --> [Pa]
+coolant_temp_limit = None # [K]; set a float to override fluid saturation/pseudocritical limit, set as JetA
 tbc_thickness = 0.0 / 1000  # [mm] → [m]; set 0 for no coating
 tbc_k = 1.0                 # [W/m-K] thermal conductivity of TBC (only used when tbc_thickness > 0)
 # circuit_inlet = -100 # Not used for now
-material = Material("AlSi10Mg")
+material = Material("GRCop-42")
 
 #print(f"Fuel Mdot : {round(tot_coolant_mdot, 3)} kg/s")
 #print(f"OX Mdot : {round(engine.ox_mdot, 3)} kg/s")
@@ -204,6 +206,7 @@ if design_regen:
         coolantName=coolantName,
         C_h=C_h,
         engine=engine,
+        heat_flux_knockdown=heat_flux_knockdown,
         N=N,
         C_w=C_w,
         tbc_thickness=tbc_thickness,
@@ -248,6 +251,11 @@ if design_regen:
 
     if export_regen_chans:
         regen_circuit.generate_single_channel_curves()
+
+    if export_regen_performance_excel:
+        regen_circuit.export_performance_to_excel(
+            filename=regen_performance_excel_filename,
+        )
 
 if show_bartz_plot:
     print(regen_circuit.h_hg_arr)
@@ -298,7 +306,12 @@ if show_nozzle_plot:
         plt.show()
 
 if export_nozzle:
-    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 2_6_26")
+    engine.exportGeometry(filename="Hopper Engine Contour 550 lbf 4_11_26")
+if export_nozzle_outer:
+    engine.exportGeometry(
+        filename="Hopper Engine Contour 550 lbf 4_11_26 OD",
+        wall_thickness_in=nozzle_wall_od_thickness_in,
+    )
 
 
 if export_pressures:

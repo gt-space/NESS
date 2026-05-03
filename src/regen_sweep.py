@@ -35,18 +35,19 @@ warnings.filterwarnings("ignore")
 # ------------------------------------------------------------------
 # Base engine settings
 # ------------------------------------------------------------------
-name = "Hopper SN1"
-fuName = "JetA"
+name = "Test Case"
+fuName = "Ethanol"
 oxName = "LOX"
-thrust = 500
-Pe = 20.8
-CR = 6
-Lstar = 30
-cstarEff = 0.85
+thrust = 2500
+Pe = 8
+CR = 4
+Lstar = 35
+cstarEff = 1
 pcentFFC = 0.0
 numPts = 100
 bell = True
 frozen = True
+heat_flux_knockdown = 1
 
 # Conical fallback (used if bell=False)
 chmbR = 1.35
@@ -60,11 +61,11 @@ exitR = 1.151
 # ------------------------------------------------------------------
 # Regen fixed settings
 # ------------------------------------------------------------------
-coolantName = "n-Decane"
+coolantName = "Ethanol"
 inlet_T_c = 288
 inlet_P_c = 410 * 6894.7
 coolant_temp_limit = 540
-material = Material("Pure Copper")
+material = Material("AlSi10Mg")
 
 T_wg_bracket = (200.0, 3500.0)
 T_wg_residual_tol = 1e-1
@@ -82,15 +83,15 @@ nominal = {
     "C_h": 2.0,   # mm
     "N": 49,      # count
     "t_w": 1.0,   # mm
-    "Pc": 300.0,  # psia    
-    "MR": 1.2,    # O/F
+    "Pc": 350.0,  # psia    
+    "MR": 1.4,    # O/F
 }
 
 # Sweep ranges (used for whichever variable(s) are swept).
 ranges = {
     "C_w": np.linspace(1.0, 2.5, 20),             # mm
     "C_h": np.linspace(1.0, 4.0, 20),             # mm
-    "N": np.arange(30, 49, 5).astype(float),      # count
+    "N": np.arange(40, 190, 5).astype(float),      # count
     "t_w": np.linspace(0.7, 1.6, 15),             # mm
     "Pc": np.linspace(220.0, 420.0, 17),          # psia
     "MR": np.linspace(0.8, 1.4, 17),              # O/F
@@ -99,8 +100,8 @@ ranges = {
 # Select one or two independent variables.
 # 1D sweep: set sweep_var_2 = None (only sweep_var_1 is varied).
 # 2D sweep: set both; they must differ.
-sweep_var_1 = "C_h"
-sweep_var_2 = None
+sweep_var_1 = "C_w"
+sweep_var_2 = "N"
 
 
 def _axis_label(var_name):
@@ -169,6 +170,7 @@ def run_single(case, engine_cache, fail_log=None):
             coolantName=coolantName,
             C_h=float(case["C_h"]) / 1000.0,
             engine=engine,
+            heat_flux_knockdown=heat_flux_knockdown,
             N=int(round(case["N"])),
             C_w=float(case["C_w"]) / 1000.0,
         )

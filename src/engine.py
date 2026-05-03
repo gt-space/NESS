@@ -270,10 +270,23 @@ class Engine:
         self.fu_mdot = tot_mdot / (1.0 + self.MRcore)
         self.ox_mdot = tot_mdot - self.fu_mdot
 
-    def exportGeometry(self, filename):
+    def exportGeometry(self, filename, wall_thickness_in=0.0):
+        """
+        Export the nozzle contour as [X, Y] coordinates in a .txt file for import into CAD.
+
+        Parameters
+        ----------
+        filename : str
+            Base path (``.txt`` is appended).
+        wall_thickness_in : float, optional
+            Inches added to the inner (gas-side) radius at each axial station. Use ``0`` for the
+            inner contour (ID). Set to the structural wall thickness ID→OD to export the outer
+            contour (OD).
+        """
+        dr = float(wall_thickness_in)
         # Export the nozzle contour as [X, Y] coordinates in a .txt file for import into CAD.
         if self.bell:
-            x = self.Contour_r
+            x = [float(r) + dr for r in self.Contour_r]
             y = [-n for n in self.Contour_z]
 
             with open(filename + '.txt', "w") as f:
@@ -282,12 +295,12 @@ class Engine:
         else:
             # Conical nozzle: export only the 5 critical points
             z = np.array(self.Contour_z)*-1
-            r = np.array(self.Contour_r)
+            r = np.array(self.Contour_r, dtype=float) + dr
 
-            chamber_mask = np.isclose(r, self.chmbR, rtol=1e-6, atol=1e-6)
+            chamber_mask = np.isclose(r, self.chmbR + dr, rtol=1e-6, atol=1e-6)
             idx_chamber_end = np.where(chamber_mask)[0][-1]
 
-            throat_mask = np.isclose(r, self.throatR, rtol=1e-6, atol=1e-6)
+            throat_mask = np.isclose(r, self.throatR + dr, rtol=1e-6, atol=1e-6)
             throat_indices = np.where(throat_mask)[0]
             idx_throat_start = throat_indices[0]
             idx_throat_end = throat_indices[-1]

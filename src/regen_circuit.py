@@ -2,6 +2,7 @@ import numpy as np
 import sympy as sp
 import math
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 from matplotlib.patches import Rectangle, Polygon
 from matplotlib.collections import PatchCollection
@@ -31,6 +32,7 @@ class RegenCircuit:
         coolantName,
         C_h,
         engine,
+        heat_flux_knockdown,
         N = None,
         f_w = None,
         C_w = None,
@@ -48,6 +50,7 @@ class RegenCircuit:
         self.C_h = C_h
         self.ch_AR = self.C_h / self.C_w
         self.engine = engine # Engine object from engine.py
+        self.heat_flux_knockdown = heat_flux_knockdown
         self.tbc_thickness = float(tbc_thickness)
         self.tbc_k = float(tbc_k) if tbc_k is not None else None
 
@@ -201,7 +204,7 @@ class RegenCircuit:
         def _station_eval(T_wg_trial):
             h_hg_use, sigma_use, _ = _resolve_sigma_and_h(T_wg_trial)
 
-            T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out = self.thermal_network(
+            T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out, eta_f_out = self.thermal_network(
                 r_eng=self.engine.Contour_r[i] * 0.0254,
                 t_w=self.t_w,
                 c_w=self.C_w,
@@ -216,7 +219,7 @@ class RegenCircuit:
             # Residual: T_wg trial must equal the TBC outer surface temperature.
             # When tbc_thickness == 0, T_tbc_out == T_hw_out.
             residual = float(T_wg_trial) - float(T_tbc_out)
-            return residual, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out
+            return residual, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out, eta_f_out
 
         # --- Bracket endpoints only, then brentq on the sub-interval with a sign change ---
         twg_grid = np.linspace(twg_min, twg_max, 2)
@@ -266,8 +269,8 @@ class RegenCircuit:
                 f"T_wg root residual too high at station {i}: |residual|={abs(residual):.6f} > {residual_tol}."
             )
 
-        _, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out = station
-        return sol.root, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out
+        _, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out, eta_f_out = station
+        return sol.root, h_hg_use, sigma_use, T_hg_out, T_c_out, T_cw_out, T_hw_out, qdot_out, A_ch_eff_out, T_tbc_out, eta_f_out
 
     def coolant_htc(
         self,
@@ -425,7 +428,7 @@ class RegenCircuit:
         A_ch_eff = (eta_o * A_t) / self.N
 
         # Thermal Resistances
-        R_hghw = 1 / (0.7 * h_hg * A_hwall_ch)
+        R_hghw = 1 / (self.heat_flux_knockdown * h_hg * A_hwall_ch)
         R_tbc = 0.0
         if self.tbc_thickness > 0.0 and self.tbc_k is not None:
             R_tbc = self.tbc_thickness / (self.tbc_k * A_hwall_ch)
@@ -446,7 +449,7 @@ class RegenCircuit:
             T_tbc_val = T_hg_new - qdot_val * R_hghw           # TBC outer surface (gas-side)
             T_hw_val = T_tbc_val - qdot_val * R_tbc             # metal hot wall under coating
             T_cw_val = T_hw_val - qdot_val * R_wall
-            return T_hg_new, T_c_new, T_cw_val, T_hw_val, qdot_val, A_ch_eff, T_tbc_val
+            return T_hg_new, T_c_new, T_cw_val, T_hw_val, qdot_val, A_ch_eff, T_tbc_val, eta_f
 
         '''
         # Debug Prints
@@ -482,7 +485,7 @@ class RegenCircuit:
 
         T_tbc_val = float(T_hg) - float(qdot) * R_hghw
 
-        return T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff, T_tbc_val
+        return T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff, T_tbc_val, eta_f
     
     def solve_circuit(
         self,
@@ -552,6 +555,7 @@ class RegenCircuit:
         self.coolant_boiling_arr = np.empty(n_stations)
         self.T_tbc_arr = np.empty(n_stations)
         self.q_flux_arr = np.empty(n_stations)
+        self.eta_f_arr = np.empty(n_stations)
 
         # T and P Tracker
         P_c = inlet_pressure
@@ -579,7 +583,7 @@ class RegenCircuit:
                 debug=False,
             )
 
-            T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff, T_tbc = self.solve_bartz_twg_station(
+            T_wg_sol, h_hg, sigma, T_hg, T_c, T_cw, T_hw, qdot, A_ch_eff, T_tbc, eta_f = self.solve_bartz_twg_station(
                 i=i,
                 T_c=T_c,
                 h_c=h_c,
@@ -666,6 +670,7 @@ class RegenCircuit:
             self.coolant_boiling_arr[out_idx] = coolant_boiling_local
             self.T_tbc_arr[out_idx] = T_tbc
             self.q_flux_arr[out_idx] = q_flux
+            self.eta_f_arr[out_idx] = eta_f
 
             if print_station_rows:
                 z_in = float(self.engine.Contour_z[i])
@@ -902,38 +907,42 @@ class RegenCircuit:
         inner_wall_thickness = self.t_w * 1000.0
         channel_height = self.C_h * 1000.0
         channel_width = self.C_w * 1000.0
-        wall_width = self.t_w * 1000.0
+        wall_width = self.f_w * 1000.0
 
-        # Common angular spacing for channels/ribs around circumference
-        total_angle_per_channel = 2 * np.pi / self.N
+        # Common angular spacing for channels/ribs around circumference.
+        # Cast SymPy numeric types to native Python floats/ints for NumPy compatibility.
+        n_channels = int(round(float(self.N)))
+        total_angle_per_channel = float(2.0 * np.pi / n_channels)
 
         fig, axs = plt.subplots(1, 3, figsize=(18, 6))
 
         for ax, idx, title in zip(axs, section_indices, section_titles):
-            inner_radius = contour_r_mm[idx]
-            hot_wall_inner_radius = inner_radius - inner_wall_thickness
-            channel_outer_radius = inner_radius + channel_height
+            # Engine contour is gas-side wall ID. Build layers radially outward:
+            # gas wall ID -> hot wall OD -> channel OD -> outer shell OD.
+            gas_wall_inner_radius = contour_r_mm[idx]
+            hot_wall_outer_radius = gas_wall_inner_radius + inner_wall_thickness
+            channel_outer_radius = hot_wall_outer_radius + channel_height
             outer_radius = channel_outer_radius + outer_wall_thickness
 
             # Local channel/rib angular widths at this station
-            channel_angle = channel_width / inner_radius
-            wall_angle = wall_width / inner_radius
+            channel_angle = float(channel_width / hot_wall_outer_radius)
+            wall_angle = float(wall_width / hot_wall_outer_radius)
             if (channel_angle + wall_angle) > total_angle_per_channel:
-                channel_angle = total_angle_per_channel - wall_angle
+                channel_angle = float(total_angle_per_channel - wall_angle)
 
             theta = np.linspace(0, 2*np.pi, 200)
 
             # Combustion chamber core
             ax.fill(
-                hot_wall_inner_radius * np.cos(theta),
-                hot_wall_inner_radius * np.sin(theta),
+                gas_wall_inner_radius * np.cos(theta),
+                gas_wall_inner_radius * np.sin(theta),
                 color='lightcoral', alpha=0.3
             )
 
             # Hot wall annulus
             hot_wall_annulus = np.vstack([
-                np.column_stack([inner_radius * np.cos(theta), inner_radius * np.sin(theta)]),
-                np.column_stack([hot_wall_inner_radius * np.cos(theta[::-1]), hot_wall_inner_radius * np.sin(theta[::-1])])
+                np.column_stack([hot_wall_outer_radius * np.cos(theta), hot_wall_outer_radius * np.sin(theta)]),
+                np.column_stack([gas_wall_inner_radius * np.cos(theta[::-1]), gas_wall_inner_radius * np.sin(theta[::-1])])
             ])
             ax.add_patch(Polygon(hot_wall_annulus, facecolor='red', edgecolor='darkred', linewidth=1.5, alpha=0.7))
 
@@ -947,19 +956,19 @@ class RegenCircuit:
             # Rib region annulus background
             rib_annulus = np.vstack([
                 np.column_stack([channel_outer_radius * np.cos(theta), channel_outer_radius * np.sin(theta)]),
-                np.column_stack([inner_radius * np.cos(theta[::-1]), inner_radius * np.sin(theta[::-1])])
+                np.column_stack([hot_wall_outer_radius * np.cos(theta[::-1]), hot_wall_outer_radius * np.sin(theta[::-1])])
             ])
             ax.add_patch(Polygon(rib_annulus, facecolor='gray', edgecolor='none', alpha=0.6))
 
             # Channels
             current_angle = 0.0
-            for _ in range(self.N):
+            for _ in range(n_channels):
                 theta_start = current_angle
                 theta_end = current_angle + channel_angle
                 theta_channel = np.linspace(theta_start, theta_end, 20)
 
-                x_ch_inner = inner_radius * np.cos(theta_channel)
-                y_ch_inner = inner_radius * np.sin(theta_channel)
+                x_ch_inner = hot_wall_outer_radius * np.cos(theta_channel)
+                y_ch_inner = hot_wall_outer_radius * np.sin(theta_channel)
                 x_ch_outer = channel_outer_radius * np.cos(theta_channel[::-1])
                 y_ch_outer = channel_outer_radius * np.sin(theta_channel[::-1])
 
@@ -972,12 +981,12 @@ class RegenCircuit:
                     )
                 )
 
-                current_angle += total_angle_per_channel
+                current_angle = float(current_angle + total_angle_per_channel)
 
             if show_dimensions:
                 ax.text(
                     0.02, 0.98,
-                    f"R_inner = {inner_radius:.2f} mm\nOD = {2*outer_radius:.2f} mm\nZ = {contour_z_in[idx]:.3f} in",
+                    f"R_gas_ID = {gas_wall_inner_radius:.2f} mm\nOD = {2*outer_radius:.2f} mm\nZ = {contour_z_in[idx]:.3f} in",
                     transform=ax.transAxes,
                     verticalalignment='top',
                     fontsize=9,
@@ -1055,16 +1064,11 @@ class RegenCircuit:
         t_w = self.t_w * 39.3701  # meters to inches (local variable)
         f_w = self.f_w * 39.3701  # meters to inches (local variable)
         
-        # Calculate radii
-        r_inner = r_contour + t_w  # Inner surface (where channel starts radially)
-        r_outer = r_contour + C_h  # Outer surface (channel outer boundary)
-        
-        # Calculate angular positions for one channel
-        # Channel starts at angle = 0
-        # Channel width in angular terms
-        theta_channel_start = 0.0
-        theta_channel_end = C_w / r_contour[0]  # Approximate angle at first station
-        
+        # Radial extent: gas-side contour r_contour, then liner t_w, then channel depth C_h.
+        # Channel inner (hot side of coolant path) and outer (cold side) — both in inches.
+        r_inner = r_contour + t_w
+        r_outer = r_inner + C_h  # was wrongly r_contour + C_h (ignored t_w; radial span was C_h - t_w)
+
         # For each axial station, calculate the 4 corners in 3D space
         n_points = len(z_contour)
         
@@ -1210,6 +1214,104 @@ class RegenCircuit:
         
         return corners
 
+    def export_performance_to_excel(self, filename="regen_performance_outputs.xlsx"):
+        """
+        Export per-station regen and gas-side performance outputs to an Excel workbook.
+        """
+        try:
+            from openpyxl import Workbook
+        except ImportError as exc:
+            raise ImportError(
+                "openpyxl is required for Excel export. Install it with: pip install openpyxl"
+            ) from exc
+
+        z_in = np.asarray(self.engine.Contour_z, dtype=float)
+        z_m = z_in * 0.0254
+        coolant_rho_arr = np.array([
+            PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
+            for T_val, P_val in zip(self.T_c_arr, self.P_c_arr)
+        ])
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Axial Performance"
+
+        headers = [
+            "Axial Position (in)",
+            "Axial Position (m)",
+            "Gas Temperature (K)",
+            "Gas Pressure (psia)",
+            "Gas Density (kg/m^3)",
+            "Hot Wall Temp (K)",
+            "Cold Wall Temp (K)",
+            "Coolant Bulk Temp (K)",
+            "Coolant Pressure (psia)",
+            "Coolant Density (kg/m^3)",
+            "Coolant Velocity (m/s)",
+            "Qdot (W)",
+            "Heat Flux (W/m^2)",
+            "Heat Flux (MW/m^2)",
+            "Hot Gas HTC (W/m^2-K)",
+            "Coolant HTC Selected (W/m^2-K)",
+            "Coolant HTC Gnielinski (W/m^2-K)",
+            "Coolant HTC Dittus-Boelter (W/m^2-K)",
+            "Bartz Sigma (-)",
+            "Reynolds Number (-)",
+            "Prandtl Number (-)",
+            "Darcy Friction Factor (-)",
+            "Pressure Drop dP (Pa)",
+            "Pressure Drop dP (psid)",
+            "Coolant Boiling Limit (K)",
+            "TBC Surface Temp (K)",
+            "Tangential Stress Total (Pa)",
+            "Tangential Stress Pressure (Pa)",
+            "Tangential Stress Thermal (Pa)",
+            "Longitudinal Stress Total (Pa)",
+            "Longitudinal Stress Thermal (Pa)",
+        ]
+        ws.append(headers)
+
+        for i in range(len(z_in)):
+            ws.append([
+                float(z_in[i]),
+                float(z_m[i]),
+                float(self.engine.T[i]),
+                float(self.engine.P[i]),
+                float(self.engine.rho[i]),
+                float(self.T_hw_arr[i]),
+                float(self.T_cw_arr[i]),
+                float(self.T_c_arr[i]),
+                float(self.P_c_arr[i] / 6894.76),
+                float(coolant_rho_arr[i]),
+                float(self.coolant_vel_arr[i]),
+                float(self.Qdot_arr[i]),
+                float(self.q_flux_arr[i]),
+                float(self.q_flux_arr[i] / 1e6),
+                float(self.h_hg_arr[i]),
+                float(self.h_c_arr[i]),
+                float(self.h_c_gn_arr[i]),
+                float(self.h_c_db_arr[i]),
+                float(self.sigma[i]),
+                float(self.Re[i]),
+                float(self.Pr_arr[i]),
+                float(self.f_D_arr[i]),
+                float(self.DP_arr[i]),
+                float(self.DP_arr[i] / 6894.76),
+                float(self.coolant_boiling_arr[i]),
+                float(self.T_tbc_arr[i]),
+                float(self.sigma_t[i]),
+                float(self.sigma_pt[i]),
+                float(self.sigma_tt[i]),
+                float(self.sigma_l[i]),
+                float(self.sigma_pl[i]),
+            ])
+
+        output_path = Path(filename)
+        if output_path.suffix.lower() != ".xlsx":
+            output_path = output_path.with_suffix(".xlsx")
+        wb.save(output_path)
+        print(f"Saved regen axial performance export: {output_path.resolve()}")
+
     def outputs(
         self,
         show_regen_temps=True,
@@ -1228,6 +1330,7 @@ class RegenCircuit:
         show_coolant_htc_both=False,
         show_bartz_sigma=True,
         show_heat_flux=True,
+        show_fin_efficiency=True,
     ):
         #### ---- PLOTS ---- ####
         pa_to_ksi = 1.0 / 6894757.293168
@@ -1297,7 +1400,7 @@ class RegenCircuit:
                 axs[1].set_visible(False)
             fig.tight_layout()
 
-        if show_qdot or show_re or show_pr or show_coolant_density or show_coolant_velocity:
+        if show_qdot or show_re or show_pr or show_coolant_density or show_coolant_velocity or show_fin_efficiency:
             plot_specs = []
             if show_qdot:
                 plot_specs.append(("Radial Heat Flow", self.Qdot_arr, "Qdot", "Qdot [J]"))
@@ -1309,6 +1412,8 @@ class RegenCircuit:
                 plot_specs.append(("Coolant Density", coolant_rho_arr, "Coolant Density", "Density [kg/m^3]"))
             if show_coolant_velocity:
                 plot_specs.append(("Coolant Velocity", self.coolant_vel_arr, "Coolant Velocity", "Velocity [m/s]"))
+            if show_fin_efficiency:
+                plot_specs.append(("Fin Efficiency", self.eta_f_arr, "Fin Efficiency", "η_f [---]"))
 
             nplots = len(plot_specs)
             ncols = 2
