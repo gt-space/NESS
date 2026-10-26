@@ -32,7 +32,8 @@ from scipy.interpolate import interp1d
 class Engine:
 
     def __init__(self, thrust, Pc, Pe, MRcore, oxName, fuName, name, CR, Lstar, cstarEff, frozen, pcentFFC = 0.0, Pamb = 14.8, numPts = 200, verbose = False,
-                 bell = True, chmbR=None, chmbL=None, contAngle=None, throatR=None, throatL=None, expAngle=None, exitR=None):
+                 bell = True, chmbR=None, chmbL=None, contAngle=None, throatR=None, throatL=None, expAngle=None, exitR=None,
+                 chmbFilletR=0.0, throatFilletR=0.0, cstarEffInFlow=False):
         self.thrust = thrust
         self.Pc_psia = Pc
         self.Pc = Pc
@@ -56,8 +57,17 @@ class Engine:
         self.throatL = throatL
         self.expAngle = expAngle
         self.exitR = exitR
+        self.chmbFilletR = 0.0 if chmbFilletR is None else float(chmbFilletR)   # [in] chamber-to-cone fillet (conical only)
+        self.throatFilletR = 0.0 if throatFilletR is None else float(throatFilletR)   # [in] cone-to-throat fillet (conical only)
+        self.frozen = frozen
+        # False (default, original behavior): flows follow Pc*At/c*_ideal. True: flows follow Pc*At/(cstarEff*c*_ideal),
+        # i.e. real propellant flow for a given Pc when the combustion efficiency is below 1.
+        self.cstarEffInFlow = bool(cstarEffInFlow)
         self.createEngine(verbose=verbose)
         self.calcGasProperties(frozen)
+        # The point the hardware was designed for (Pc, MR and flows). Off-design analysis can move the engine away from it.
+        self.design_state = dict(Pc_psia=float(self.Pc_psia), MR=float(self.MRcore),
+                                 ox_mdot=float(self.ox_mdot), fu_mdot=float(self.fu_mdot))
 
     def createEngine(self, verbose=False):
         G = Geometry(CR=self.CR, LchamberInp=self.Lprime, RchmConv=2.5, pcentBell=80)
@@ -73,6 +83,11 @@ class Engine:
         
         self.R.set_eps_to_equal_pexit( Pexit_psia=self.Pe )
         self.R.scale_Rt_to_Thrust( self.thrust, Pamb=self.Pamb )
+        # What RocketIsp sized for the requested thrust (kept for the design consistency check)
+        self.rocketisp_throatR = float(np.sqrt(self.R.geomObj.At / np.pi))                     # [in]
+        self.rocketisp_tot_mdot = float((self.R.coreObj.wdotOx + self.R.coreObj.wdotFl) * 0.453592)   # [kg/s]
+        if (not self.bell) and self.throatR is None:
+            self.throatR = self.rocketisp_throatR      # conical + throatR=None: size the throat for the requested thrust
 
         self.R.geomObj.getNozObj()
         self.Contour_z = [-self.R.geomObj.Lcham] + self.R.geomObj.nozObj.abs_zContour
@@ -85,7 +100,10 @@ class Engine:
             self.Contour_z, self.Contour_r = self.makeConicalContour()
         
         self.Contour_z, self.Contour_r, self.throat_ind, self.chamberEnd_ind = self.resample_nozzle_contour(
-        z_contour = self.Contour_z, r_contour = self.Contour_r, numPts = self.numPts, verbose=verbose)        
+        z_contour = self.Contour_z, r_contour = self.Contour_r, numPts = self.numPts, verbose=verbose)
+        if not self.bell:
+            # The cubic-spline resample can undershoot the throat radius by ~1e-5 in; the conical contour never goes below it.
+            self.Contour_r = np.maximum(np.asarray(self.Contour_r, dtype=float), self.throatR)        
         
         print(f"Chamber End Ind: {self.chamberEnd_ind}")
         print(f"Throat Ind: {self.throat_ind}")
@@ -100,42 +118,93 @@ class Engine:
         self.r_ch = self.Contour_r[0]
         self.r_throat = self.Contour_r[self.throat_ind]
         self.r_up_throat = self.R.geomObj.RupThroat * 0.0254 # [in] --> [m]
+        if not self.bell and self.throatFilletR > 0.0:
+            # Conical contour: the cone-to-throat fillet IS the upstream throat radius of curvature used by Bartz.
+            self.r_up_throat = self.throatFilletR * 0.0254 # [in] --> [m]
         self.fu_mdot = self.R.coreObj.wdotFl * 0.453592
         self.ox_mdot = self.R.coreObj.wdotOx * 0.453592
+
+    def conicalGeometry(self):
+        """
+        Key points and fillets of the conical contour (all lengths in inches, axial origin at the throat centre).
+
+        Layout, left to right:  cylindrical chamber -> [chamber fillet] -> converging cone -> [throat fillet]
+        -> flat throat (length throatL, between tangent points) -> diverging cone.
+
+        chmbFilletR rounds the chamber/cone corner and throatFilletR rounds the cone/throat corner. Each fillet
+        is a circular arc tangent to both walls it joins. Because the throat arc needs room beyond the flat
+        throat, the converging side is shifted upstream by its tangent length; the flat throat, the diverging
+        cone and the exit stay where they are.
+
+        Returns a dict with x_c1 / x_c2 (the two virtual sharp corners), x_start (chamber start), x_fs / x_fe (flat
+        throat start/end), x_exit, and fillet dicts f1 / f2 (None when the radius is 0). A fillet dict has the
+        arc centre (xc, rc), radius R, tangent length T and axial extent x_start..x_end.
+        """
+        th = np.radians(self.contAngle)
+        al = np.radians(self.expAngle)
+        R1 = max(float(self.chmbFilletR), 0.0)
+        R2 = max(float(self.throatFilletR), 0.0)
+        T1 = R1 * np.tan(th / 2.0)
+        T2 = R2 * np.tan(th / 2.0)
+
+        x_fs = -self.throatL / 2.0
+        x_fe = self.throatL / 2.0
+        x_c2 = x_fs - T2                                           # cone / throat virtual corner
+        x_c1 = x_c2 - (self.chmbR - self.throatR) / np.tan(th)     # chamber / cone virtual corner
+        x_start = x_c1 - self.chmbL
+        x_exit = x_fe + (self.exitR - self.throatR) / np.tan(al)
+
+        cone_length = (self.chmbR - self.throatR) / np.sin(th)     # along the cone between the virtual corners
+        if T1 + T2 >= 0.999 * cone_length:
+            raise ValueError(
+                f"The fillets need {T1 + T2:.3f} in of converging cone (chmbFilletR {R1} in + throatFilletR {R2} in) "
+                f"but only {cone_length:.3f} in is available. Reduce a fillet radius or lengthen the cone."
+            )
+        if T1 > self.chmbL:
+            raise ValueError(
+                f"chmbFilletR = {R1} in needs {T1:.3f} in of straight chamber but chmbL is only {self.chmbL} in. "
+                "Reduce chmbFilletR or lengthen the chamber."
+            )
+
+        f1 = f2 = None
+        if R1 > 0.0:
+            f1 = dict(xc=x_c1 - T1, rc=self.chmbR - R1, R=R1, T=T1,
+                      x_start=x_c1 - T1, x_end=x_c1 - T1 + R1 * np.sin(th))
+        if R2 > 0.0:
+            f2 = dict(xc=x_fs, rc=self.throatR + R2, R=R2, T=T2,
+                      x_start=x_fs - R2 * np.sin(th), x_end=x_fs)
+        return dict(x_c1=x_c1, x_c2=x_c2, x_start=x_start, x_fs=x_fs, x_fe=x_fe, x_exit=x_exit, f1=f1, f2=f2)
+
+    def conicalContourRadius(self, x, g=None):
+        """Gas-side wall radius [in] of the conical contour at axial position x [in]."""
+        g = g or self.conicalGeometry()
+        th = np.radians(self.contAngle)
+        al = np.radians(self.expAngle)
+        f1, f2 = g["f1"], g["f2"]
+        x_cyl_end = f1["x_start"] if f1 else g["x_c1"]
+        x_cone_end = f2["x_start"] if f2 else g["x_fs"]
+        if x <= x_cyl_end:
+            return self.chmbR
+        if f1 is not None and x < f1["x_end"]:
+            return f1["rc"] + np.sqrt(max(f1["R"] ** 2 - (x - f1["xc"]) ** 2, 0.0))
+        if x <= x_cone_end:
+            return self.throatR + np.tan(th) * (g["x_c2"] - x)
+        if f2 is not None and x < f2["x_end"]:
+            return f2["rc"] - np.sqrt(max(f2["R"] ** 2 - (x - f2["xc"]) ** 2, 0.0))
+        if x <= g["x_fe"]:
+            return self.throatR
+        return self.throatR + np.tan(al) * (x - g["x_fe"])
 
     def makeConicalContour(self):
         if self.chmbR is None or self.throatR is None:
             raise ValueError("You set bell=False but did not provide the conical dimensions")
 
-        contAngle_rad = np.radians(self.contAngle)
-        expAngle_rad = np.radians(self.expAngle)
-
-        x_throat_start = -self.throatL / 2
-        x_throat_end = self.throatL / 2
-
-        x_length_conv = (self.chmbR - self.throatR) / np.tan(contAngle_rad)
-        x_chamber_end = x_throat_start - x_length_conv
-
-        x_chamber_start = x_chamber_end - self.chmbL
-
-        x_length_div = (self.exitR - self.throatR) / np.tan(expAngle_rad)
-        x_exit = x_throat_end + x_length_div
-
-        z_coords = np.linspace(x_chamber_start, x_exit, self.numPts)
-        temp_r_coords = []
-
-        for x in z_coords:
-            if x <= x_chamber_end:
-                y = self.chmbR
-            elif x <= x_throat_start:
-                m = -np.tan(contAngle_rad)
-                y = self.chmbR + m * (x - x_chamber_end)
-            elif x <= x_throat_end:
-                y = self.throatR
-            else:
-                m = np.tan(expAngle_rad)
-                y = self.throatR + m * (x - x_throat_end)
-            temp_r_coords.append(y)
+        g = self.conicalGeometry()
+        # A fillet needs a finer raw contour so the arc is smooth before it is resampled to numPts.
+        has_fillet = g["f1"] is not None or g["f2"] is not None
+        n_raw = self.numPts if not has_fillet else max(self.numPts, 800)
+        z_coords = np.linspace(g["x_start"], g["x_exit"], n_raw)
+        temp_r_coords = [self.conicalContourRadius(x, g) for x in z_coords]
 
         return z_coords, np.array(temp_r_coords)
 
@@ -266,9 +335,49 @@ class Engine:
         # Compute mass flows from Pc, cstar, At for off-design re-calls.
         # At is in in^2; cstar in m/s; Pc in Pa.
         At_m2 = self.At * 0.00064516  # in^2 → m^2
-        tot_mdot = (self.Pc * At_m2) / self.cstar  # kg/s
+        tot_mdot = (self.Pc * At_m2) / (self.cstar * self.flow_cstar_factor())  # kg/s
         self.fu_mdot = tot_mdot / (1.0 + self.MRcore)
         self.ox_mdot = tot_mdot - self.fu_mdot
+
+    def flow_cstar_factor(self):
+        """Multiplier on the CEA c* used in the Pc <-> mass-flow relation (cstarEff if cstarEffInFlow else 1)."""
+        return float(self.cstarEff) if getattr(self, "cstarEffInFlow", False) else 1.0
+
+    def cea_thrust_lbf(self, Pc_psia, MR):
+        """Ideal CEA thrust [lbf] of THIS geometry (throat At, exit area ratio) at chamber pressure and mixture ratio."""
+        from utils import _cea_obj_w_units_like_engine
+        C = _cea_obj_w_units_like_engine(self.oxName, self.fuName)
+        eps = float(self.AreaRatio[-1])
+        _, CFamb, _ = C.get_PambCf(Pamb=self.Pamb, Pc=float(Pc_psia), MR=float(MR), eps=eps)
+        return float(CFamb) * float(Pc_psia) * self.At          # psia * in^2 = lbf
+
+    def design_consistency(self):
+        """
+        Does the geometry you entered actually make the thrust you asked for at the design Pc and MR?
+        Returns a dict (all lengths in inches, thrust in lbf, flows in kg/s).
+        """
+        thrust_geom = self.cea_thrust_lbf(self.Pc_psia, self.MRcore)
+        return dict(
+            requested_thrust=float(self.thrust),
+            geometry_thrust=thrust_geom,
+            ratio=thrust_geom / float(self.thrust),
+            throatR=float(self.throatR) if self.throatR is not None else float(np.sqrt(self.At / np.pi)),
+            rocketisp_throatR=self.rocketisp_throatR,
+            design_flow=float(self.fu_mdot + self.ox_mdot),
+            rocketisp_flow=self.rocketisp_tot_mdot,
+        )
+
+    def print_design_check(self):
+        d = self.design_consistency()
+        print("\n---- DESIGN CHECK: thrust requested vs thrust of this geometry ----")
+        print(f"  Requested thrust            : {d['requested_thrust']:.0f} lbf at Pc {self.Pc_psia:g} psia, MR {self.MRcore:g}")
+        print(f"  This geometry (ideal CEA CF): {d['geometry_thrust']:.0f} lbf  ({d['ratio'] * 100:.0f}% of requested)")
+        print(f"  Throat radius               : {d['throatR']:.3f} in used; RocketIsp sizes {d['rocketisp_throatR']:.3f} in for {d['requested_thrust']:.0f} lbf")
+        print(f"  Design flow used by this code: {d['design_flow']:.3f} kg/s; RocketIsp's {d['requested_thrust']:.0f} lbf flow: {d['rocketisp_flow']:.3f} kg/s"
+              + ("" if self.cstarEffInFlow else f"  (c* efficiency {self.cstarEff:g} is not applied to flows; set cstarEffInFlow=True to apply it)"))
+        if abs(d["ratio"] - 1.0) > 0.05:
+            print(f"  NOTE: the throat is {'smaller' if d['ratio'] < 1 else 'larger'} than a {d['requested_thrust']:.0f} lbf design needs. "
+                  f"Set throatR = {d['rocketisp_throatR']:.3f} in (or None to size it automatically) to match.")
 
     def exportGeometry(self, filename, wall_thickness_in=0.0):
         """
@@ -293,43 +402,37 @@ class Engine:
                 for xi, yi in zip(x, y):
                     f.write(f"{xi:.6f}in\t{yi:.6f}in\t0in\n")
         else:
-            # Conical nozzle: export only the 5 critical points
-            contAngle_rad = np.radians(self.contAngle)
-            expAngle_rad = np.radians(self.expAngle)
-
-            x_throat_start = -self.throatL / 2.0
-            x_throat_end = self.throatL / 2.0
-
-            x_length_conv = (self.chmbR - self.throatR) / np.tan(contAngle_rad)
-            x_chamber_end = x_throat_start - x_length_conv
-            x_chamber_start = x_chamber_end - self.chmbL
-
-            x_length_div = (self.exitR - self.throatR) / np.tan(expAngle_rad)
-            x_exit = x_throat_end + x_length_div
+            # Conical nozzle: export the critical points, with sampled arcs where a fillet is used
+            g = self.conicalGeometry()
+            th = np.radians(self.contAngle)
+            f1, f2 = g["f1"], g["f2"]
 
             # x_crit = radius (r), y_crit = axial position (z)
-            x_crit = [
-                self.chmbR,
-                self.chmbR,
-                self.throatR,
-                self.throatR,
-                self.exitR
-            ]
-            
-            y_crit = [
-                x_chamber_start,
-                x_chamber_end,
-                x_throat_start,
-                x_throat_end,
-                x_exit
-            ]
+            x_crit = [self.chmbR]
+            y_crit = [g["x_start"]]
+            if f1 is None:
+                x_crit.append(self.chmbR)
+                y_crit.append(g["x_c1"])
+            else:
+                ang = np.linspace(0.0, th, 13)
+                y_crit += list(f1["xc"] + f1["R"] * np.sin(ang))
+                x_crit += list(f1["rc"] + f1["R"] * np.cos(ang))
+            if f2 is None:
+                x_crit.append(self.throatR)
+                y_crit.append(g["x_fs"])
+            else:
+                ang = np.linspace(-th, 0.0, 13)
+                y_crit += list(f2["xc"] + f2["R"] * np.sin(ang))
+                x_crit += list(f2["rc"] - f2["R"] * np.cos(ang))
+            x_crit += [self.throatR, self.exitR]
+            y_crit += [g["x_fe"], g["x_exit"]]
 
             # Export exact critical points
             with open(filename + '.txt', "w") as f:
                 for xi, yi in zip(x_crit, y_crit):
                     f.write(f"{xi:.6f}in\t{yi:.6f}in\t0in\n")
         
-    def solveAreaMach(self, tol=1e-8):
+    def solveAreaMach(self, tol=1e-6):
         """
         Solve for Mach number with Area Ratio.
         

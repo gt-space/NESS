@@ -11,6 +11,8 @@ from scipy.optimize import fsolve, root_scalar
 from utils import solve_system, check_defined_vars
 from CoolProp.CoolProp import PropsSI
 from fluid import Fluid
+from redlines import draw_redline, exceeded_mask, span_text
+from redline_explain import explain_regen, print_explanations
 from tqdm import tqdm
 
 '''
@@ -566,6 +568,8 @@ class RegenCircuit:
         print_station_rows=False,
         use_recovery_temp=False,
         enforce_gnielinski_validity=True,
+        enforce_melting_limit=True,
+        enforce_boiling_limit=True,
     ):
         # Circuit extent comes from the "inlet" and "outlet" station positions (see build_channel_geometry).
         circuit_inlet = self.circuit_inlet
@@ -662,6 +666,16 @@ class RegenCircuit:
                 sigma_clamp=sigma_clamp,
                 use_recovery_temp=use_recovery_temp,
             )
+            melting_point = getattr(self.material, "MeltingPoint", None)
+            if enforce_melting_limit and melting_point is not None and T_hw > melting_point:
+                raise ValueError(
+                    f" === Hot wall above {self.material.material_name} melting point at z index {i} "
+                    f"(z={float(self.engine.Contour_z[i]):.3f} in): T_hw={T_hw:.1f} K vs "
+                    f"{melting_point:.1f} K ({melting_point - 273.15:.0f} C). The wall fails. Here the gas film (h = {h_hg:.0f} W/m^2-K) delivers "
+                    f"{qdot / (ds[i] * (2 * np.pi * self.engine.Contour_r[i] * 0.0254 / self.N)) / 1e6:.1f} MW/m^2 but the coolant at {T_c:.0f} K only removes it with "
+                    f"h = {h_c:.0f} W/m^2-K, so the wall climbs until the heat gets through. Improve coolant-side cooling here "
+                    "(narrower channel / higher velocity, fewer channels) or reduce the heat load."
+                )
             q_flux = qdot / (ds[i] * ((2 * np.pi * self.engine.Contour_r[i] * 0.0254) / self.N)) # W/m^2
             
             # Stress Calculations
@@ -709,7 +723,7 @@ class RegenCircuit:
                 coolant_boiling_local = self.calculate_boiling_point(P_c, T_c, self.coolantName, plot_cp_curve=False)
             else:
                 coolant_boiling_local = float(coolant_temp_limit)
-            if T_c > coolant_boiling_local:
+            if enforce_boiling_limit and T_c > coolant_boiling_local:
                 raise ValueError(
                     f" === Coolant above local boiling limit at z index {i}: "
                     f"T_c={round(T_c, 2)} K vs limit {round(coolant_boiling_local, 2)} K at P={round(P_c / 6894.76, 2)} psia!"
@@ -1026,125 +1040,237 @@ class RegenCircuit:
             print(f"  {n:8s} z={st['z']:8.3f} in  C_w={st['C_w'] * 1000:6.3f} mm  C_h={st['C_h'] * 1000:6.3f} mm")
         print(f"Min fin width: {self.f_w_arr[worst] * 1000:.3f} mm at z={self.circuit_z[worst]:.3f} in")
 
+    def _draw_cross_section(self, ax, idx, title, show_dimensions=True, outer_wall_thickness=5.0):
+        '''
+        Draw one circumferential cross-section (looking down the engine axis) of the liner, channels, ribs and
+        outer shell at contour index idx. outer_wall_thickness is the outer shell thickness [mm].
+        '''
+        contour_r_mm = np.asarray(self.engine.Contour_r) * 25.4
+        contour_z_in = np.asarray(self.engine.Contour_z)
+        inner_wall_thickness = self.t_w * 1000.0
+
+        # Common angular spacing for channels/ribs around circumference.
+        n_channels = int(round(float(self.N)))
+        total_angle_per_channel = float(2.0 * np.pi / n_channels)
+
+        # Engine contour is gas-side wall ID. Build layers radially outward:
+        # gas wall ID -> hot wall OD -> channel OD -> outer shell OD.
+        channel_height = self.C_h_contour[idx] * 1000.0
+        channel_width = self.C_w_contour[idx] * 1000.0
+        wall_width = self.f_w_contour[idx] * 1000.0
+
+        gas_wall_inner_radius = contour_r_mm[idx]
+        hot_wall_outer_radius = gas_wall_inner_radius + inner_wall_thickness
+        channel_outer_radius = hot_wall_outer_radius + channel_height
+        outer_radius = channel_outer_radius + outer_wall_thickness
+
+        # Local channel/rib angular widths at this station
+        channel_angle = float(channel_width / hot_wall_outer_radius)
+        wall_angle = float(wall_width / hot_wall_outer_radius)
+        if (channel_angle + wall_angle) > total_angle_per_channel:
+            channel_angle = float(total_angle_per_channel - wall_angle)
+
+        theta = np.linspace(0, 2*np.pi, 200)
+
+        # Combustion chamber core
+        ax.fill(
+            gas_wall_inner_radius * np.cos(theta),
+            gas_wall_inner_radius * np.sin(theta),
+            color='lightcoral', alpha=0.3
+        )
+
+        # Hot wall annulus
+        hot_wall_annulus = np.vstack([
+            np.column_stack([hot_wall_outer_radius * np.cos(theta), hot_wall_outer_radius * np.sin(theta)]),
+            np.column_stack([gas_wall_inner_radius * np.cos(theta[::-1]), gas_wall_inner_radius * np.sin(theta[::-1])])
+        ])
+        ax.add_patch(Polygon(hot_wall_annulus, facecolor='red', edgecolor='darkred', linewidth=1.5, alpha=0.7))
+
+        # Outer wall annulus
+        outer_annulus = np.vstack([
+            np.column_stack([outer_radius * np.cos(theta), outer_radius * np.sin(theta)]),
+            np.column_stack([channel_outer_radius * np.cos(theta[::-1]), channel_outer_radius * np.sin(theta[::-1])])
+        ])
+        ax.add_patch(Polygon(outer_annulus, facecolor='darkgray', edgecolor='black', linewidth=1.2, alpha=0.4))
+
+        # Rib region annulus background
+        rib_annulus = np.vstack([
+            np.column_stack([channel_outer_radius * np.cos(theta), channel_outer_radius * np.sin(theta)]),
+            np.column_stack([hot_wall_outer_radius * np.cos(theta[::-1]), hot_wall_outer_radius * np.sin(theta[::-1])])
+        ])
+        ax.add_patch(Polygon(rib_annulus, facecolor='gray', edgecolor='none', alpha=0.6))
+
+        # Channels
+        current_angle = 0.0
+        for _ in range(n_channels):
+            theta_start = current_angle
+            theta_end = current_angle + channel_angle
+            theta_channel = np.linspace(theta_start, theta_end, 20)
+
+            x_ch_inner = hot_wall_outer_radius * np.cos(theta_channel)
+            y_ch_inner = hot_wall_outer_radius * np.sin(theta_channel)
+            x_ch_outer = channel_outer_radius * np.cos(theta_channel[::-1])
+            y_ch_outer = channel_outer_radius * np.sin(theta_channel[::-1])
+
+            x_channel = np.concatenate([x_ch_inner, x_ch_outer])
+            y_channel = np.concatenate([y_ch_inner, y_ch_outer])
+            ax.add_patch(
+                Polygon(
+                    np.column_stack([x_channel, y_channel]),
+                    facecolor='lightblue', edgecolor='blue', linewidth=0.8, alpha=0.85
+                )
+            )
+
+            current_angle = float(current_angle + total_angle_per_channel)
+
+        if show_dimensions:
+            ax.text(
+                0.02, 0.98,
+                f"R_gas_ID = {gas_wall_inner_radius:.2f} mm\nOD = {2*outer_radius:.2f} mm\nZ = {contour_z_in[idx]:.3f} in",
+                transform=ax.transAxes,
+                verticalalignment='top',
+                fontsize=9,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+            )
+
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.set_xlabel('X [mm]')
+        ax.set_ylabel('Y [mm]')
+        ax.set_aspect('equal')
+        ax.set_xlim(-outer_radius*1.2, outer_radius*1.2)
+        ax.set_ylim(-outer_radius*1.2, outer_radius*1.2)
+        ax.grid(True, alpha=0.3)
+
     def plot_regen_geometry(
         self,
         engine,
-        show_dimensions = True    
+        show_dimensions = True
     ):
         '''
         Plot regen channel cross-sections at the outlet, throat, and inlet stations
         in a single window using subplots (channel size is taken from the local station geometry).
         '''
-        # Unit conversions
         contour_r_mm = np.asarray(engine.Contour_r) * 25.4
-        contour_z_in = np.asarray(engine.Contour_z)
         throat_idx = int(np.argmin(contour_r_mm))
 
         section_indices = [self.circuit_outlet, throat_idx, self.circuit_inlet]
         section_titles = ["Regen Outlet Plane", "Throat Plane", "Regen Inlet Plane"]
 
-        outer_wall_thickness = 5.0 # [mm]
-        inner_wall_thickness = self.t_w * 1000.0
-
-        # Common angular spacing for channels/ribs around circumference.
-        # Cast SymPy numeric types to native Python floats/ints for NumPy compatibility.
-        n_channels = int(round(float(self.N)))
-        total_angle_per_channel = float(2.0 * np.pi / n_channels)
-
         fig, axs = plt.subplots(1, 3, figsize=(18, 6))
-
         for ax, idx, title in zip(axs, section_indices, section_titles):
-            # Engine contour is gas-side wall ID. Build layers radially outward:
-            # gas wall ID -> hot wall OD -> channel OD -> outer shell OD.
-            channel_height = self.C_h_contour[idx] * 1000.0
-            channel_width = self.C_w_contour[idx] * 1000.0
-            wall_width = self.f_w_contour[idx] * 1000.0
-
-            gas_wall_inner_radius = contour_r_mm[idx]
-            hot_wall_outer_radius = gas_wall_inner_radius + inner_wall_thickness
-            channel_outer_radius = hot_wall_outer_radius + channel_height
-            outer_radius = channel_outer_radius + outer_wall_thickness
-
-            # Local channel/rib angular widths at this station
-            channel_angle = float(channel_width / hot_wall_outer_radius)
-            wall_angle = float(wall_width / hot_wall_outer_radius)
-            if (channel_angle + wall_angle) > total_angle_per_channel:
-                channel_angle = float(total_angle_per_channel - wall_angle)
-
-            theta = np.linspace(0, 2*np.pi, 200)
-
-            # Combustion chamber core
-            ax.fill(
-                gas_wall_inner_radius * np.cos(theta),
-                gas_wall_inner_radius * np.sin(theta),
-                color='lightcoral', alpha=0.3
-            )
-
-            # Hot wall annulus
-            hot_wall_annulus = np.vstack([
-                np.column_stack([hot_wall_outer_radius * np.cos(theta), hot_wall_outer_radius * np.sin(theta)]),
-                np.column_stack([gas_wall_inner_radius * np.cos(theta[::-1]), gas_wall_inner_radius * np.sin(theta[::-1])])
-            ])
-            ax.add_patch(Polygon(hot_wall_annulus, facecolor='red', edgecolor='darkred', linewidth=1.5, alpha=0.7))
-
-            # Outer wall annulus
-            outer_annulus = np.vstack([
-                np.column_stack([outer_radius * np.cos(theta), outer_radius * np.sin(theta)]),
-                np.column_stack([channel_outer_radius * np.cos(theta[::-1]), channel_outer_radius * np.sin(theta[::-1])])
-            ])
-            ax.add_patch(Polygon(outer_annulus, facecolor='darkgray', edgecolor='black', linewidth=1.2, alpha=0.4))
-
-            # Rib region annulus background
-            rib_annulus = np.vstack([
-                np.column_stack([channel_outer_radius * np.cos(theta), channel_outer_radius * np.sin(theta)]),
-                np.column_stack([hot_wall_outer_radius * np.cos(theta[::-1]), hot_wall_outer_radius * np.sin(theta[::-1])])
-            ])
-            ax.add_patch(Polygon(rib_annulus, facecolor='gray', edgecolor='none', alpha=0.6))
-
-            # Channels
-            current_angle = 0.0
-            for _ in range(n_channels):
-                theta_start = current_angle
-                theta_end = current_angle + channel_angle
-                theta_channel = np.linspace(theta_start, theta_end, 20)
-
-                x_ch_inner = hot_wall_outer_radius * np.cos(theta_channel)
-                y_ch_inner = hot_wall_outer_radius * np.sin(theta_channel)
-                x_ch_outer = channel_outer_radius * np.cos(theta_channel[::-1])
-                y_ch_outer = channel_outer_radius * np.sin(theta_channel[::-1])
-
-                x_channel = np.concatenate([x_ch_inner, x_ch_outer])
-                y_channel = np.concatenate([y_ch_inner, y_ch_outer])
-                ax.add_patch(
-                    Polygon(
-                        np.column_stack([x_channel, y_channel]),
-                        facecolor='lightblue', edgecolor='blue', linewidth=0.8, alpha=0.85
-                    )
-                )
-
-                current_angle = float(current_angle + total_angle_per_channel)
-
-            if show_dimensions:
-                ax.text(
-                    0.02, 0.98,
-                    f"R_gas_ID = {gas_wall_inner_radius:.2f} mm\nOD = {2*outer_radius:.2f} mm\nZ = {contour_z_in[idx]:.3f} in",
-                    transform=ax.transAxes,
-                    verticalalignment='top',
-                    fontsize=9,
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
-                )
-
-            ax.set_title(title, fontsize=12, fontweight='bold')
-            ax.set_xlabel('X [mm]')
-            ax.set_ylabel('Y [mm]')
-            ax.set_aspect('equal')
-            ax.set_xlim(-outer_radius*1.2, outer_radius*1.2)
-            ax.set_ylim(-outer_radius*1.2, outer_radius*1.2)
-            ax.grid(True, alpha=0.3)
+            self._draw_cross_section(ax, idx, title, show_dimensions=show_dimensions)
 
         fig.suptitle(f"Regenerative Cooling Channel Cross-Sections ({self.N} Channels)", fontsize=14, fontweight='bold')
         plt.tight_layout()
         plt.show()
+
+    def plot_contour_with_channels(self, title=None, t_jacket=None, show=True):
+        '''
+        Engine contour with a sketch of the regen channel cutaway alongside it.
+
+            left          : engine contour (gas-side wall), regen circuit span and the four channel stations
+            top right     : axial cutaway through the centre of a channel - hot gas, liner, coolant channel
+                            (flow inlet -> outlet) and outer jacket, with the channel size at each station
+            bottom right  : cross-sections at the regen outlet, throat and regen inlet
+
+        t_jacket : outer jacket thickness [m]; defaults to 5 mm (same as the cross-section plot).
+        The cutaway stretches the radial direction so the thin layers are visible; it is a sketch, not to scale.
+        '''
+        from matplotlib.gridspec import GridSpec
+        from matplotlib.patches import Patch
+
+        eng = self.engine
+        z_all = np.asarray(eng.Contour_z, dtype=float)
+        r_all = np.asarray(eng.Contour_r, dtype=float)
+        o, i = self.circuit_outlet, self.circuit_inlet
+        t_j_mm = 5.0 if t_jacket is None else float(t_jacket) * 1000.0
+        in_per_m = 1.0 / 0.0254
+
+        zc = z_all[o:i + 1]
+        r_gas = r_all[o:i + 1]
+        r_liner = r_gas + self.t_w * in_per_m
+        r_chan = r_liner + self.C_h_arr * in_per_m
+        r_jacket = r_chan + (t_j_mm / 1000.0) * in_per_m
+
+        fig = plt.figure(figsize=(18, 8))
+        gs = GridSpec(2, 3, figure=fig, width_ratios=[1.15, 1, 1], height_ratios=[1.1, 1])
+
+        # ---- left: engine contour ----
+        ax = fig.add_subplot(gs[:, 0])
+        ax.plot(z_all, r_all, color="blue")
+        ax.plot(z_all, -r_all, color="blue")
+        ax.plot(zc, r_gas, color="red", linewidth=3, label="Regen circuit")
+        ax.plot(zc, -r_gas, color="red", linewidth=3)
+        ax.plot([z_all[0], z_all[-1]], [0, 0], "k--", linewidth=1)
+        station_names = self.STATION_NAMES
+        for name, zs in zip(station_names, self.station_z):
+            rs = float(np.interp(zs, z_all, r_all))
+            ax.plot([zs, zs], [-rs, rs], color="gray", linestyle=":", linewidth=1)
+            ax.annotate(name, (zs, rs), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=9)
+        ax.set_title(title or "Engine contour")
+        ax.set_xlabel("Axial Distance (in)")
+        ax.set_ylabel("Radial Distance (in)")
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect("equal", adjustable="datalim")
+        r_lim = 1.5 * float(np.max(r_all))
+        ax.set_ylim(-r_lim, r_lim)
+        ax.legend(loc="lower left")
+
+        # ---- top right: axial cutaway ----
+        ax = fig.add_subplot(gs[0, 1:])
+        y_lo = 0.4 * float(np.min(r_gas))
+        y_hi = float(np.max(r_jacket)) * 1.04
+        ax.fill_between(zc, y_lo, r_gas, color="lightcoral", alpha=0.35, linewidth=0)
+        ax.fill_between(zc, r_gas, r_liner, color="red", alpha=0.75, linewidth=0)
+        ax.fill_between(zc, r_liner, r_chan, color="lightblue", alpha=0.9, linewidth=0)
+        ax.fill_between(zc, r_chan, r_jacket, color="darkgray", alpha=0.7, linewidth=0)
+        ax.plot(zc, r_gas, color="darkred", linewidth=1.2)
+        ax.plot(zc, r_liner, color="darkred", linewidth=0.8)
+        ax.plot(zc, r_chan, color="blue", linewidth=0.8)
+        ax.plot(zc, r_jacket, color="black", linewidth=1.0)
+
+        # Coolant flow arrows along the channel (inlet is the +z end, flow runs toward the outlet)
+        mid = 0.5 * (r_liner + r_chan)
+        dz_arrow = 0.07 * (zc[-1] - zc[0])
+        for frac in (0.25, 0.55, 0.85):
+            z0 = zc[0] + frac * (zc[-1] - zc[0])
+            ax.annotate("", xy=(z0 - dz_arrow, float(np.interp(z0 - dz_arrow, zc, mid))), xytext=(z0, float(np.interp(z0, zc, mid))),
+                        arrowprops=dict(arrowstyle="-|>", color="navy", lw=1.6))
+
+        # Station markers with the channel size there
+        for name, zs in zip(station_names, self.station_z):
+            st = self.stations[name]
+            ax.axvline(zs, color="k", linestyle=":", linewidth=0.9)
+            ax.text(zs, y_hi + 0.2 * (y_hi - y_lo), f"{name}\n{st['C_w'] * 1000:.2f} x {st['C_h'] * 1000:.2f} mm",
+                    ha="center", va="top", fontsize=8,
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.85, edgecolor="none"))
+
+        ax.set_xlim(zc[0], zc[-1])
+        ax.set_ylim(y_lo, y_hi + 0.22 * (y_hi - y_lo))
+        ax.set_title(f"Channel cutaway (axial cut through a channel centre, {self.N} channels; radial scale exaggerated)")
+        ax.set_xlabel("Axial Distance (in)")
+        ax.set_ylabel("Radius (in)")
+        ax.legend(
+            handles=[
+                Patch(facecolor="lightcoral", alpha=0.6, label="Hot gas"),
+                Patch(facecolor="red", alpha=0.75, label=f"Liner (hot wall) {self.t_w * 1000:.2f} mm"),
+                Patch(facecolor="lightblue", label="Coolant channel (flow inlet \u2192 outlet)"),
+                Patch(facecolor="darkgray", label=f"Outer jacket {t_j_mm:.1f} mm"),
+            ],
+            loc="lower left", fontsize=8,
+        )
+
+        # ---- bottom right: cross-sections ----
+        throat_idx = int(eng.throat_ind)
+        sections = [(o, "Regen outlet plane"), (throat_idx, "Throat plane"), (i, "Regen inlet plane")]
+        sub = gs[1, 1:].subgridspec(1, 3)
+        for col, (idx, ttl) in enumerate(sections):
+            self._draw_cross_section(fig.add_subplot(sub[0, col]), idx, ttl, show_dimensions=False, outer_wall_thickness=t_j_mm)
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        return fig
 
     def generate_single_channel_curves(
     self,
@@ -1484,8 +1610,32 @@ class RegenCircuit:
         show_bartz_sigma=True,
         show_heat_flux=True,
         show_fin_efficiency=True,
+        show_redlines=True,
+        T_hw_limit=None,
+        T_cw_limit=None,
+        dp_limit_psid=None,
     ):
+        '''
+        Plot regen circuit results. With show_redlines=True, any quantity that crosses a failure limit is
+        marked in red on its graph (limit line, X markers, shaded span, warning banner) and listed in the
+        printed summary. Redlines drawn:
+            - hot wall temp vs the material melting point, and vs T_hw_limit (your design limit) if given
+            - cold wall temp vs T_cw_limit (e.g. coolant coking/decomposition limit) if given
+            - bulk coolant temp vs the local boiling / pseudo-critical limit
+            - coolant pressure below chamber gas pressure (liner would be pushed outward)
+            - total channel pressure drop vs dp_limit_psid if given
+        '''
         #### ---- PLOTS ---- ####
+        self.redline_messages = []
+        def _rl(*args, **kwargs):
+            if not show_redlines:
+                return
+            msg = draw_redline(*args, **kwargs)
+            if msg:
+                self.redline_messages.append(msg)
+        z_c = self.circuit_z
+        melting_point = getattr(self.material, "MeltingPoint", None)
+        P_gas_psia = self.engine.P[self.circuit_outlet:self.circuit_inlet + 1]
         pa_to_ksi = 1.0 / 6894757.293168
         coolant_rho_arr = np.array([
             PropsSI("D", "T", float(T_val), "P", float(P_val), self.coolantName)
@@ -1510,6 +1660,11 @@ class RegenCircuit:
                     linestyle='--',
                     label=f'{self.coolantName} Boiling limit (local P)',
                 )
+                if melting_point is not None:
+                    _rl(axs[0], z_c, self.T_hw_arr, melting_point, f"{self.material.material_name} melting point ({melting_point:.0f} K)", banner_slot=0)
+                if T_hw_limit is not None:
+                    _rl(axs[0], z_c, self.T_hw_arr, T_hw_limit, f"Hot wall limit ({T_hw_limit:.0f} K)", banner_slot=1)
+                _rl(axs[0], z_c, self.T_c_arr, self.coolant_boiling_arr, "Coolant boiling limit", draw_limit=False, banner_slot=2)
                 axs[0].legend()
             else:
                 axs[0].set_visible(False)
@@ -1527,6 +1682,9 @@ class RegenCircuit:
                     linestyle='--',
                     label=f'{self.coolantName} Boiling limit (local P)',
                 )
+                if T_cw_limit is not None:
+                    _rl(axs[1], z_c, self.T_cw_arr, T_cw_limit, f"Cold wall limit ({T_cw_limit:.0f} K)", banner_slot=0)
+                _rl(axs[1], z_c, self.T_c_arr, self.coolant_boiling_arr, "Coolant boiling limit", draw_limit=False, banner_slot=1)
                 axs[1].legend()
             else:
                 axs[1].set_visible(False)
@@ -1538,6 +1696,10 @@ class RegenCircuit:
                 axs[0].plot(self.circuit_z, self.DP_arr / 6894.7, label='Pressure Drop')
                 axs[0].set_title("Pressure Drop along Engine")
                 axs[0].set_ylabel("DP [psia]")
+                if dp_limit_psid is not None:
+                    cum_dp_psid = np.cumsum((self.DP_arr / 6894.76)[::-1])[::-1]   # drop accumulated from the inlet
+                    axs[0].plot(z_c, cum_dp_psid, color='C2', label='Cumulative drop from inlet')
+                    _rl(axs[0], z_c, cum_dp_psid, dp_limit_psid, f"Max channel DP ({dp_limit_psid:g} psid)", banner_slot=0)
                 axs[0].legend()
             else:
                 axs[0].set_visible(False)
@@ -1548,6 +1710,7 @@ class RegenCircuit:
                 axs[1].set_title("Pressures along Engine")
                 axs[1].set_xlabel("Axial Position [m]")
                 axs[1].set_ylabel("Pressure [psia]")
+                _rl(axs[1], z_c, self.P_c_arr / 6894.7, P_gas_psia, "Coolant pressure below gas pressure", above=False, draw_limit=False, banner_slot=0)
                 axs[1].legend()
             else:
                 axs[1].set_visible(False)
@@ -1688,6 +1851,15 @@ class RegenCircuit:
         print(f"Coolant Outlet Temp [K]: {round(max(self.T_c_arr), 2)}")
         print(f"Max Heat Flux [MW/m^2]: {round(float(np.max(self.q_flux_arr)) / 1e6, 3)}")
         print(f"Coolant Boiling Temp Margin [K]: {round(boiling_temp_margin, 2)}")
+
+        if show_redlines:
+            if self.redline_messages:
+                print("\n!!!! REDLINES EXCEEDED !!!!")
+                for msg in self.redline_messages:
+                    print(f"  - {msg}")
+            else:
+                print("\nNo redlines exceeded on the plotted quantities.")
+            print_explanations(explain_regen(self, T_hw_limit=T_hw_limit, T_cw_limit=T_cw_limit, dp_limit_psid=dp_limit_psid))
 
         plt.show()
         

@@ -41,7 +41,8 @@ class Material:
 
         elif self.material_name == "AlSi10Mg":
             self.rho = 2670 # kg/m^3
-            self.k = 140 # W/mK
+            self.k = 150 # W/mK
+            self.MeltingPoint = 843.15 # K (570 C)
             self.E = 70E9 # Pa
             self.alpha = 20.E-6 # m/m/C
             self.v = 0.35
@@ -49,7 +50,25 @@ class Material:
             # Yield Stress vs. Temperature Lookup Table
             T = np.array([298.15, 323.15, 373.15, 423.15, 473.15, 523.15, 573.15, 623.15, 673.15]) # K
             sigma_y = np.array([29.587752, 28.717524, 26.251878, 26.396916, 22.916004, 19.145016, 10.15266, 4.35114, 1.740456]) # ksi
-            self.stress_interp = PchipInterpolator(T, sigma_y)
+            self.stress_interp = PchipInterpolator(T, sigma_y, extrapolate=False)
+            self._stress_T_range = (T[0], T[-1])   # table covers 298-673 K (77-750 F); data source: AM AlSi10Mg yield vs temp
+
+            # --- Structural / fatigue data (used by structural.py) ---
+            # UTS and elongation vs temperature: Table A2 of Materials 2022, 15(20), 7386 (stress-relieved
+            # LPBF AlSi10Mg, 0 deg build, tested at RT/125/250/450 C). Different source than the yield table
+            # above - sanity check the two together.
+            self._uts_T = np.array([293.15, 398.15, 523.15, 723.15])                 # K
+            self._uts_tab = np.array([280.2, 249.7, 162.8, 34.4]) * 1e6              # Pa
+            # Fracture ductility: that paper reports only engineering elongation (6.4/7.7/15.6/26.5 %), no
+            # reduction of area, so eps_f = ln(1 + e) is used - a LOWER BOUND on true fracture strain.
+            self._eps_f_T = self._uts_T
+            self._eps_f_tab = np.log(1.0 + np.array([0.0637, 0.0766, 0.1564, 0.2649]))
+            # Cyclic curve: Ramberg-Osgood fit for L-PBF AlSi10Mg at ROOM TEMPERATURE, Metals 2022, 12(6), 898
+            # (Table 4: E_stab = 73.7 GPa, K' = 852.5 MPa, n' = 0.2218). No elevated-temperature n' was found;
+            # RT value is used at all temperatures.
+            self.n_cyc = 0.2218
+            self.cyc_yield_ratio = 1.0
+            self.structural_data_verified = False   # mixed sources, no elevated-T cyclic data
 
         elif self.material_name == "GRCop-42":
             self.rho = 8960 # kg/m^3 - UPDATE
@@ -132,7 +151,14 @@ class Material:
             props["sigma_uts"] = float(np.interp(T, self._strength_T, self._sigma_uts_tab))
             props["in_table"] = bool(self._strength_T[0] <= T <= self._strength_T[-1])
         elif hasattr(self, "stress_interp"):
-            props["sigma_y"] = float(self.stress_interp(T)) * 6894757.293168
+            T_lo, T_hi = self._stress_T_range
+            props["sigma_y"] = float(self.stress_interp(min(max(T, T_lo), T_hi))) * 6894757.293168
+            props["in_table"] = bool(T_lo - 6.0 <= T <= T_hi)
+        if hasattr(self, "_uts_T"):
+            props["sigma_uts"] = float(np.interp(T, self._uts_T, self._uts_tab))
+            props["in_table"] = props["in_table"] and bool(self._uts_T[0] - 6.0 <= T <= self._uts_T[-1])
+        if hasattr(self, "_eps_f_T"):
+            props["eps_f"] = float(np.interp(T, self._eps_f_T, self._eps_f_tab))
         return props
 
     def update_material_properties(self, T):
@@ -142,7 +168,8 @@ class Material:
         # Temperature-dependent properties are optional. If a material only has
         # hardcoded constants, leave values unchanged and simply return current properties.
         if hasattr(self, "stress_interp"):
-            self.sigma_y_ksi = float(self.stress_interp(T))
+            T_lo, T_hi = self._stress_T_range
+            self.sigma_y_ksi = float(self.stress_interp(min(max(T, T_lo), T_hi)))
             self.sigma_y = self.sigma_y_ksi * 6894757.293168  # [ksi] -> [Pa]
 
         props = {}
