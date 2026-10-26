@@ -5,12 +5,12 @@ Liquid rocket engine sizing and regenerative cooling analysis and design. It can
 
 ## Features
 - Design an engine contour and get performance values (using RocketIsp)
-- Design the thermals/fluid of regenerative cooling circuit
+- Design the thermals/fluid of regenerative cooling circuit (Bartz hot-gas side, Gnielinski coolant side)
+- Variable-area regen channels, fully input driven: width/height at four stations (regen inlet, chamber, throat, regen outlet) plus channel count `N`
+- Liner stress and life (`src/structural.py`): thermal gradient stress, pressure bending and hoop stress, Neuber-corrected local plasticity, and low-cycle-fatigue cycles to failure
 
 ## Future Features
 - Basic film cooling model 
-- Variable area regen coolant channels
-- Stress analysis on liner hot wall
 - Perform parametric/sensitivity studies on channel geometry to analyze liner thermal/fluids behavior
 - Two-pass cooling
 

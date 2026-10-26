@@ -45,6 +45,17 @@ use_fixed_bartz_sigma = False       # If True, override Bartz sigma with fixed v
 fixed_bartz_sigma = 1.0             # Used only when use_fixed_bartz_sigma=True
 sigma_clamp = (0.5, 1.5)                  # If set to (min_sigma, max_sigma), clamps sigma in Bartz station solve
 coolant_htc_correlation = "Gnielinski"    # "Gnielinski" or "Dittus-Boelter"
+use_recovery_temp = False          # If True, drive heat flux with the adiabatic wall (recovery) temp instead of static gas temp
+
+# STRESS & LIFECYCLE (structural.py)
+run_structural_analysis = True      # Thermal + hoop/pressure stress, Neuber-corrected LCF life
+stress_concentration_Kt = 1.0       # Local Kt at the liner/rib fillet (1.0 = none)
+life_safety_factor = 4.0            # Allowable cycles = predicted cycles / this
+required_cycles = 20                # Mission duty cycles to pass/fail against (None to skip)
+t_jacket = None                     # [m] outer jacket thickness for the jacket hoop check (None to skip)
+show_structural_plots = False       # Stress components / von Mises / life vs position
+export_structural_excel = False     # Per-station stress & life table
+structural_excel_filename = "Liner Stress Life.xlsx"
 print_regen_station_rows = False   # If True, print per-station lines like "T_hw : … K" (tqdm still runs)
 
 # ENGINE / PERFORMANCE OUTPUTS
@@ -175,9 +186,19 @@ if show_gas_props:
 ### --- REGEN CIRCUIT INPUTS --- ###
 t_w = 1 / 1000 # [mm] --> [m]
 nozzle_wall_od_thickness_in = 0.25  # [in] ID→OD structural thickness for export_nozzle_outer (CAD outer contour)
-N = 126
-C_w = 1 / 1000 # [mm] --> [m]
-C_h = 3 / 1000 # [mm] --> [m]
+N = 60                                # number of channels
+
+# Channel geometry is defined at four stations along the circuit (coolant flows inlet -> outlet).
+# C_w = channel width, C_h = channel height, both in meters. "z" is the axial position in inches
+# (same axis as engine.Contour_z); leave it out to use the contour start / end of chamber / throat / contour end.
+# Dimensions are linearly interpolated in z between stations.
+regen_stations = {
+    "inlet":   {"C_w": 1.0 / 1000, "C_h": 3.0 / 1000},   # nozzle end, where coolant enters  [mm] --> [m]
+    "throat":  {"C_w": 1.0 / 1000, "C_h": 3.0 / 1000},   # at the throat
+    "chamber": {"C_w": 1.0 / 1000, "C_h": 3.0 / 1000},   # along the chamber
+    "outlet":  {"C_w": 1.0 / 1000, "C_h": 3.0 / 1000},   # injector end, where coolant leaves
+}
+min_fin_width = 0.5 / 1000      # [m] smallest rib allowed anywhere on the circuit
 heat_flux_knockdown = 1
 coolantName = "n-Dodecane"
 tot_coolant_mdot = engine.fu_mdot # kg/s
@@ -205,11 +226,11 @@ if design_regen:
         material=material,
         tot_coolant_mdot=tot_coolant_mdot,
         coolantName=coolantName,
-        C_h=C_h,
         engine=engine,
         heat_flux_knockdown=heat_flux_knockdown,
         N=N,
-        C_w=C_w,
+        stations=regen_stations,
+        min_fin_width=min_fin_width,
         tbc_thickness=tbc_thickness,
         tbc_k=tbc_k,
     )
@@ -228,7 +249,21 @@ if design_regen:
         coolant_htc_correlation=coolant_htc_correlation,
         coolant_temp_limit=coolant_temp_limit,
         print_station_rows=print_regen_station_rows,
+        use_recovery_temp=use_recovery_temp,
     )
+
+    if run_structural_analysis:
+        structural = regen_circuit.run_structural_analysis(
+            Kt=stress_concentration_Kt,
+            life_safety_factor=life_safety_factor,
+            required_cycles=required_cycles,
+            t_jacket=t_jacket,
+        )
+        structural.summary()
+        if show_structural_plots:
+            structural.plot()
+        if export_structural_excel:
+            structural.export_to_excel(structural_excel_filename)
 
     if display_regen_outputs:
         regen_circuit.outputs(
